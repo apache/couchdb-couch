@@ -50,9 +50,9 @@ cookie(Key, Value, Options) ->
             RawAge ->
                 When = case proplists:get_value(local_time, Options) of
                            undefined ->
-                               calendar:local_time();
+                               calendar:universal_time();
                            LocalTime ->
-                               LocalTime
+                               erlang:localtime_to_universaltime(LocalTime)
                        end,
                 Age = case RawAge < 0 of
                           true ->
@@ -116,33 +116,12 @@ quote(V0) ->
         orelse erlang:error({cookie_quoting_required, V}),
     V.
 
-
-%% Return a date in the form of: Wdy, DD-Mon-YYYY HH:MM:SS GMT
-%% See also: rfc2109: 10.1.2
-rfc2109_cookie_expires_date(LocalTime) ->
-    {{YYYY,MM,DD},{Hour,Min,Sec}} =
-        case calendar:local_time_to_universal_time_dst(LocalTime) of
-            [] ->
-                {Date, {Hour1, Min1, Sec1}} = LocalTime,
-                LocalTime2 = {Date, {Hour1 + 1, Min1, Sec1}},
-                case calendar:local_time_to_universal_time_dst(LocalTime2) of
-                    [Gmt]   -> Gmt;
-                    [_,Gmt] -> Gmt
-                end;
-            [Gmt]   -> Gmt;
-            [_,Gmt] -> Gmt
-        end,
-    DayNumber = calendar:day_of_the_week({YYYY,MM,DD}),
-    lists:flatten(
-      io_lib:format("~s, ~2.2.0w-~3.s-~4.4.0w ~2.2.0w:~2.2.0w:~2.2.0w GMT",
-                    [httpd_util:day(DayNumber),DD,httpd_util:month(MM),YYYY,Hour,Min,Sec])).
-
-add_seconds(Secs, LocalTime) ->
-    Greg = calendar:datetime_to_gregorian_seconds(LocalTime),
+add_seconds(Secs, UniversalTime) ->
+    Greg = calendar:datetime_to_gregorian_seconds(UniversalTime),
     calendar:gregorian_seconds_to_datetime(Greg + Secs).
 
-age_to_cookie_date(Age, LocalTime) ->
-    rfc2109_cookie_expires_date(add_seconds(Age, LocalTime)).
+age_to_cookie_date(Age, UniversalTime) ->
+    couch_util:rfc1123_date(add_seconds(Age, UniversalTime)).
 
 %% @spec parse_cookie(string()) -> [{K::string(), V::string()}]
 %% @doc Parse the contents of a Cookie header field, ignoring cookie
