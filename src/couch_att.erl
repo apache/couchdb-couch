@@ -287,7 +287,7 @@ disk_info(ActiveFd, Atts) ->
                 [{_, Pos}, AttLen] = fetch([data, att_len], Att),
                 {Pos, AttLen}
             end, Atts),
-            {ok, Tuples, Info};
+            {ok, Tuples, lists:usort(Info)};
         true ->
             ?LOG_ERROR("MISMATCH: ~p ; ~p~n", [ActiveFd, Atts]),
             file_mismatch

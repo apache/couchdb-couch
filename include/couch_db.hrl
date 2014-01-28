@@ -63,7 +63,7 @@
     update_seq = 0,
     deleted = false,
     rev_tree = [],
-    leafs_size = 0
+    sizes = {0, 0}
 }).
 
 -record(httpd, {
@@ -204,6 +204,6 @@
     deleted,
     ptr,
     seq,
-    size = nil
+    sizes = nil
 }).
 
