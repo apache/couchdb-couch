@@ -14,6 +14,7 @@
 
 -export([compress/2, decompress/1, is_compressed/2]).
 -export([get_compression_method/0]).
+-export([uncompressed_length/1]).
 
 -include_lib("couch/include/couch_db.hrl").
 
@@ -81,4 +82,13 @@ is_compressed(<<?TERM_PREFIX, _/binary>>, Method) ->
     Method =:= none;
 is_compressed(Term, _Method) when not is_binary(Term) ->
     false.
+
+
+uncompressed_length(<<?SNAPPY_PREFIX, _/binary>> = Bin) ->
+    snappy:uncompressed_length(Bin);
+uncompressed_length(<<?COMPRESSED_TERM_PREFIX, _/binary>> = Bin) ->
+    <<131, 80, Size:4/big-unsigned-integer-unit:8, _/binary>> = Bin,
+    Size;
+uncompressed_length(<<?TERM_PREFIX, _/binary>> = Bin) ->
+    size(Bin).
 

@@ -342,40 +342,60 @@ collect_updates(GroupedDocsAcc, ClientsAcc, MergeConflicts, FullCommit) ->
     end.
 
 rev_tree(DiskTree) ->
-    couch_key_tree:mapfold(fun
-        (_RevId, {IsDeleted, BodyPointer, UpdateSeq}, leaf, _Acc) ->
+    couch_key_tree:map(fun
+        (_RevId, {Del, Ptr, Seq}) ->
             % pre 1.2 format, will be upgraded on compaction
-            {#leaf{deleted=?i2b(IsDeleted), ptr=BodyPointer, seq=UpdateSeq}, nil};
-        (_RevId, {IsDeleted, BodyPointer, UpdateSeq}, branch, Acc) ->
-            {#leaf{deleted=?i2b(IsDeleted), ptr=BodyPointer, seq=UpdateSeq}, Acc};
-        (_RevId, {IsDeleted, BodyPointer, UpdateSeq, Size}, leaf, Acc) ->
-            Acc2 = sum_leaf_sizes(Acc, Size),
-            {#leaf{deleted=?i2b(IsDeleted), ptr=BodyPointer, seq=UpdateSeq, size=Size}, Acc2};
-        (_RevId, {IsDeleted, BodyPointer, UpdateSeq, Size}, branch, Acc) ->
-            {#leaf{deleted=?i2b(IsDeleted), ptr=BodyPointer, seq=UpdateSeq, size=Size}, Acc};
-        (_RevId, ?REV_MISSING, _Type, Acc) ->
-            {?REV_MISSING, Acc}
-    end, 0, DiskTree).
+            #leaf{deleted=?i2b(Del), ptr=Ptr, seq=Seq};
+        (_RevId, {Del, Ptr, Seq, Size}) ->
+            % Pre-bigcouch format, will be upgraded on compaction
+            #leaf{
+                deleted = ?i2b(Del),
+                ptr = Ptr,
+                seq = Seq,
+                sizes = {Size, 0},
+                atts = []
+            };
+        (_RevId, {Del, Ptr, Seq, Sizes, Atts}) ->
+            #leaf{
+                deleted = ?i2b(Del),
+                ptr = Ptr,
+                seq = Seq,
+                sizes = Sizes,
+                atts = Atts
+            };
+        (_RevId, ?REV_MISSING) ->
+            ?REV_MISSING
+    end, DiskTree).
 
 disk_tree(RevTree) ->
     couch_key_tree:map(fun
         (_RevId, ?REV_MISSING) ->
             ?REV_MISSING;
-        (_RevId, #leaf{deleted=IsDeleted, ptr=BodyPointer, seq=UpdateSeq, size=Size}) ->
-            {?b2i(IsDeleted), BodyPointer, UpdateSeq, Size}
+        (_RevId, #leaf{}=Leaf) ->
+            #leaf{
+                deleted = Del,
+                ptr = Ptr,
+                seq = Seq,
+                sizes = Sizes,
+                atts = Atts
+            } = Leaf,
+            {?b2i(Del), Ptr, Seq, upgrade_sizes(Sizes), Atts}
     end, RevTree).
+
+upgrade_sizes({_, _} = Sizes) ->
+    Sizes;
+upgrade_sizes(S) when is_integer(S) ->
+    {S, 0}.
 
 btree_by_seq_split(#full_doc_info{id=Id, update_seq=Seq, deleted=Del, rev_tree=T}) ->
     {Seq, {Id, ?b2i(Del), disk_tree(T)}}.
 
 btree_by_seq_join(Seq, {Id, Del, DiskTree}) when is_integer(Del) ->
-    {RevTree, LeafsSize} = rev_tree(DiskTree),
     #full_doc_info{
         id = Id,
         update_seq = Seq,
         deleted = ?i2b(Del),
-        rev_tree = RevTree,
-        leafs_size = LeafsSize
+        rev_tree = rev_tree(DiskTree)
     };
 btree_by_seq_join(KeySeq, {Id, RevInfos, DeletedRevInfos}) ->
     % Older versions stored #doc_info records in the seq_tree.
@@ -389,49 +409,59 @@ btree_by_seq_join(KeySeq, {Id, RevInfos, DeletedRevInfos}) ->
             [#rev_info{rev=Rev,seq=Seq,deleted=true,body_sp = Bp} ||
                 {Rev, Seq, Bp} <- DeletedRevInfos]}.
 
-btree_by_id_split(#full_doc_info{id=Id, update_seq=Seq,
-        deleted=Deleted, rev_tree=Tree}) ->
-    {Id, {Seq, ?b2i(Deleted), disk_tree(Tree)}}.
+btree_by_id_split(#full_doc_info{}=Info) ->
+    #full_doc_info{
+        id = Id,
+        update_seq = Seq,
+        deleted = Del,
+        sizes = Sizes,
+        rev_tree = Tree
+    } = Info,
+    {Id, {Seq, ?b2i(Del), upgrade_sizes(Sizes), disk_tree(Tree)}}.
 
 btree_by_id_join(Id, {HighSeq, Deleted, DiskTree}) ->
-    {Tree, LeafsSize} = rev_tree(DiskTree),
+    % Upgrade from pre-BigCouch disk format
+    ActiveSize = couch_key_tree:fold(fun
+        (_RevId, {_Del, _Ptr, _Seq}, _, Acc) ->
+            Acc;
+        (_RevId, {_Del, _Ptr, _Seq, Size}, _, Acc) ->
+            Acc + Size;
+        (_RevId, {_Del, _Ptr, _Seq, Sizes, _Atts}, _, Acc) ->
+            {Active, _} = Sizes,
+            Active + Acc;
+        (_RevId, ?REV_MISSING, _, Acc) ->
+            Acc
+    end, 0, DiskTree),
+    btree_by_id_join(Id, {HighSeq, Deleted, {ActiveSize, 0}, DiskTree});
+
+btree_by_id_join(Id, {HighSeq, Deleted, Sizes, DiskTree}) ->
     #full_doc_info{
         id = Id,
         update_seq = HighSeq,
         deleted = ?i2b(Deleted),
-        rev_tree = Tree,
-        leafs_size = LeafsSize
+        sizes = Sizes,
+        rev_tree = rev_tree(DiskTree)
     }.
 
 btree_by_id_reduce(reduce, FullDocInfos) ->
-    lists:foldl(
-        fun(Info, {NotDeleted, Deleted, Size}) ->
-            Size2 = sum_leaf_sizes(Size, Info#full_doc_info.leafs_size),
-            case Info#full_doc_info.deleted of
-            true ->
-                {NotDeleted, Deleted + 1, Size2};
-            false ->
-                {NotDeleted + 1, Deleted, Size2}
-            end
-        end,
-        {0, 0, 0}, FullDocInfos);
-btree_by_id_reduce(rereduce, Reds) ->
-    lists:foldl(
-        fun({NotDeleted, Deleted}, {AccNotDeleted, AccDeleted, _AccSize}) ->
-            % pre 1.2 format, will be upgraded on compaction
-            {AccNotDeleted + NotDeleted, AccDeleted + Deleted, nil};
-        ({NotDeleted, Deleted, Size}, {AccNotDeleted, AccDeleted, AccSize}) ->
-            AccSize2 = sum_leaf_sizes(AccSize, Size),
-            {AccNotDeleted + NotDeleted, AccDeleted + Deleted, AccSize2}
-        end,
-        {0, 0, 0}, Reds).
+    lists:foldl(fun
+        (#full_doc_info{deleted=false, sizes=Sizes}, {NotDel, Del, SAcc}) ->
+            {NotDel + 1, Del, reduce_sizes(Sizes, SAcc)};
+        (#full_doc_info{deleted=true, sizes=Sizes}, {NotDel, Del, SAcc}) ->
+            {NotDel, Del + 1, reduce_sizes(Sizes, SAcc)}
+    end, {0, 0, {0, 0}}, FullDocInfos);
+btree_by_id_reduce(rereduce, Reductions) ->
+    lists:foldl(fun
+        ({NotDel, Del}, {NDAcc, DAcc, SAcc}) ->
+            {NotDel + NDAcc, Del + DAcc, SAcc};
+        ({NotDel, Del, Sizes}, {NDAcc, DAcc, SAcc}) ->
+            {NotDel + NDAcc, Del + DAcc, reduce_sizes(Sizes, SAcc)}
+    end, {0, 0, {0, 0}}, Reductions).
 
-sum_leaf_sizes(nil, _) ->
-    nil;
-sum_leaf_sizes(_, nil) ->
-    nil;
-sum_leaf_sizes(Size1, Size2) ->
-    Size1 + Size2.
+reduce_sizes({A1, E1}, {A2, E2}) ->
+    {A1 + A2, E1 + E2};
+reduce_sizes(S, {_, _} = Acc) when is_integer(S) ->
+    reduce_sizes({S, 0}, Acc).
 
 btree_by_seq_reduce(reduce, DocInfos) ->
     % count the number of documents
@@ -549,10 +579,15 @@ flush_trees(_Db, [], AccFlushedTrees) ->
 flush_trees(#db{fd = Fd} = Db,
         [InfoUnflushed | RestUnflushed], AccFlushed) ->
     #full_doc_info{update_seq=UpdateSeq, rev_tree=Unflushed} = InfoUnflushed,
-    {Flushed, LeafsSize} = couch_key_tree:mapfold(
+    {Flushed, FinalAcc} = couch_key_tree:mapfold(
         fun(_Rev, Value, Type, Acc) ->
             case Value of
-            #doc{deleted = IsDeleted, body = {summary, Summary, AttsFd}} ->
+            #doc{} = Doc ->
+                #doc{
+                    deleted = IsDeleted,
+                    body = {summary, Summary, AttsFd},
+                    atts = Atts
+                } = Doc,
                 % this node value is actually an unwritten document summary,
                 % write to disk.
                 % make sure the Fd in the written bins is the same Fd we are
@@ -571,31 +606,44 @@ flush_trees(#db{fd = Fd} = Db,
                             " changed. Possibly retrying.", []),
                     throw(retry)
                 end,
-                {ok, NewSummaryPointer, SummarySize} =
-                    couch_file:append_raw_chunk(Fd, Summary),
-                TotalSize = lists:foldl(
-                    fun(#att{att_len = L}, A) -> A + L end,
-                    SummarySize, Value#doc.atts),
-                NewValue = #leaf{deleted=IsDeleted, ptr=NewSummaryPointer,
-                                 seq=UpdateSeq, size=TotalSize},
-                case Type of
-                leaf ->
-                    {NewValue, Acc + TotalSize};
-                branch ->
-                    {NewValue, Acc}
-                end;
-             {_, _, _, LeafSize} when Type =:= leaf, LeafSize =/= nil ->
-                {Value, Acc + LeafSize};
-             _ ->
+                AttsInfo = lists:usort([
+                        {P, L} || #att{data = {_, P}, att_len = L} <- Atts
+                    ]),
+                [_, _, SummaryBin] = Summary,
+                ExternalSize = couch_compress:uncompressed_length(SummaryBin),
+                {ok, NewPtr, ActiveSize}
+                    = couch_file:append_raw_chunk(Fd, Summary),
+                Leaf = #leaf{
+                    deleted = IsDeleted,
+                    ptr = NewPtr,
+                    seq = UpdateSeq,
+                    sizes = {ActiveSize, ExternalSize},
+                    atts = AttsInfo
+                },
+                {Leaf, add_sizes(Type, Leaf, Acc)};
+            #leaf{} = Leaf ->
+                {Value, add_sizes(Type, Leaf, Acc)};
+             ?REV_MISSING ->
                 {Value, Acc}
             end
-        end, 0, Unflushed),
+        end, {0, 0, []}, Unflushed),
+    {FinalAS, FinalES, FinalAtts} = FinalAcc,
+    TotalAttSize = lists:foldl(fun({_, S}, A) -> S + A end, 0, FinalAtts),
     InfoFlushed = InfoUnflushed#full_doc_info{
         rev_tree = Flushed,
-        leafs_size = LeafsSize
+        sizes = {FinalAS + TotalAttSize, FinalES + TotalAttSize}
     },
     flush_trees(Db, RestUnflushed, [InfoFlushed | AccFlushed]).
 
+add_sizes(branch, _, Acc) ->
+    Acc;
+add_sizes(leaf, #leaf{sizes=Sizes, atts=AttSizes}, Acc) ->
+    {ActiveSize, ExternalSize} = upgrade_sizes(Sizes),
+    {ASAcc, ESAcc, AttsAcc} = Acc,
+    NewASAcc = ActiveSize + ASAcc,
+    NewESAcc = ExternalSize + ESAcc,
+    NewAttsAcc = lists:umerge(AttSizes, AttsAcc),
+    {NewASAcc, NewESAcc, NewAttsAcc}.
 
 send_result(Client, Ref, NewResult) ->
     % used to send a result to the client
@@ -896,23 +944,34 @@ copy_docs(Db, #db{fd = DestFd} = NewDb, MixedInfos, Retry) ->
         A =< B
     end, merge_lookups(MixedInfos, LookupResults)),
 
-    NewInfos1 = lists:map(
-        fun(#full_doc_info{rev_tree=RevTree}=Info) ->
-            Info#full_doc_info{rev_tree=couch_key_tree:map(
-                fun(_, _, branch) ->
-                    ?REV_MISSING;
-                (_Rev, #leaf{ptr=Sp}=Leaf, leaf) ->
-                    {_Body, AttsInfo} = Summary = copy_doc_attachments(
-                        Db, Sp, DestFd),
-                    SummaryChunk = make_doc_summary(NewDb, Summary),
-                    {ok, Pos, SummarySize} = couch_file:append_raw_chunk(
-                        DestFd, SummaryChunk),
-                    TotalLeafSize = lists:foldl(
-                        fun({_, _, _, AttLen, _, _, _, _}, S) -> S + AttLen end,
-                        SummarySize, AttsInfo),
-                    Leaf#leaf{ptr=Pos, size=TotalLeafSize}
-                end, RevTree)}
-        end, NewInfos0),
+    NewInfos1 = lists:map(fun(Info) ->
+        {NewRevTree, FinalAcc} = couch_key_tree:mapfold(fun
+            (_Rev, #leaf{ptr=Sp}=Leaf, leaf, SizesAcc) ->
+                {Body, AttInfos} = copy_doc_attachments(Db, Sp, DestFd),
+                Summary = make_doc_summary(NewDb, {Body, AttInfos}),
+                [_, _, SummaryBin] = Summary,
+                ExternalSize = couch_compress:uncompressed_length(SummaryBin),
+                {ok, Pos, ActiveSize}
+                    = couch_file:append_raw_chunk(DestFd, Summary),
+                AttSizes = [{element(3, A), element(4, A)} || A <- AttInfos],
+                NewLeaf = Leaf#leaf{
+                    ptr = Pos,
+                    sizes = {ActiveSize, ExternalSize},
+                    atts = lists:usort(AttSizes)
+                },
+                {NewLeaf, add_sizes(leaf, NewLeaf, SizesAcc)};
+            (_Rev, _Value, branch, SizesAcc) ->
+                {?REV_MISSING, SizesAcc}
+        end, {0, 0, []}, Info#full_doc_info.rev_tree),
+        {FinalAS, FinalES, FinalAtts} = FinalAcc,
+        TotalAttSize = lists:foldl(fun({_, S}, A) -> S + A end, 0, FinalAtts),
+        NewActiveSize = FinalAS + TotalAttSize,
+        NewExternalSize = FinalES + TotalAttSize,
+        Info#full_doc_info{
+            rev_tree = NewRevTree,
+            sizes = {NewActiveSize, NewExternalSize}
+        }
+    end, NewInfos0),
 
     NewInfos = stem_full_doc_infos(Db, NewInfos1),
     RemoveSeqs =

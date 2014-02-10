@@ -61,8 +61,8 @@ final_reduce(#btree{reduce=Reduce}, Val) ->
     final_reduce(Reduce, Val);
 final_reduce(Reduce, {[], []}) ->
     Reduce(reduce, []);
-final_reduce(_Bt, {[], [Red]}) ->
-    Red;
+final_reduce(Reduce, {[], [Red]}) ->
+    Reduce(rereduce, [Red]);
 final_reduce(Reduce, {[], Reductions}) ->
     Reduce(rereduce, Reductions);
 final_reduce(Reduce, {KVs, Reductions}) ->
@@ -92,14 +92,14 @@ fold_reduce(#btree{root=Root}=Bt, Fun, Acc, Options) ->
 
 full_reduce(#btree{root=nil,reduce=Reduce}) ->
     {ok, Reduce(reduce, [])};
-full_reduce(#btree{root=Root}) ->
-    {ok, element(2, Root)}.
+full_reduce(#btree{root=Root, reduce=Reduce}) ->
+    {ok, Reduce(rereduce, [element(2, Root)])}.
 
 size(#btree{root = nil}) ->
     0;
 size(#btree{root = {_P, _Red}}) ->
     % pre 1.2 format
-    nil;
+    undefined;
 size(#btree{root = {_P, _Red, Size}}) ->
     Size.
 
