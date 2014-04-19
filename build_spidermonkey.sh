@@ -155,7 +155,7 @@ build_js()
     cp $JSDIR/js/src/*.h $JS_INCDIR
     cp $JSDIR/js/src/*.tbl $JS_INCDIR
     cp $JSDIR/js/src/libjs_static.a $JS_LIBDIR
-
+}
 
 
 do_setup()
