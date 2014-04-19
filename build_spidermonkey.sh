@@ -20,13 +20,13 @@ DISTDIR=$CORE_TOP/.dists
 # nspr sources
 NSPR_VER=4.8.8
 NSPR_DISTNAME=nspr-$NSPR_VER.tar.gz
-NSPR_SITE=http://dl.refuge.io
+NSPR_SITE=http://ftp.mozilla.org/pub/mozilla.org/nspr/releases/v4.8.8/src/
 
 # spidermonkey js sources
 JS_VER=185-1.0.0
 JS_REALVER=1.8.5
 JS_DISTNAME=js$JS_VER.tar.gz
-JS_SITE=http://dl.refuge.io
+JS_SITE=http://ftp.mozilla.org/pub/mozilla.org/js
 JSDIR=$STATICLIBS/js-$JS_REALVER
 JS_LIBDIR=$STATICLIBS/js/lib
 JS_INCDIR=$STATICLIBS/js/include
@@ -155,7 +155,7 @@ build_js()
     cp $JSDIR/js/src/*.h $JS_INCDIR
     cp $JSDIR/js/src/*.tbl $JS_INCDIR
     cp $JSDIR/js/src/libjs_static.a $JS_LIBDIR
-}
+
 
 
 do_setup()

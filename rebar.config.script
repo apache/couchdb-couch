@@ -69,11 +69,10 @@ GetFlag = fun(Name, Default) ->
         end
     end,
 
+{ok, Cwd} = file:get_cwd(),
 
-
-PortEnv = case os:getenv("COUCHDB_STATIC") of
+PortEnvUnix = case os:getenv("COUCHDB_STATIC") of
     "1" ->
-        {ok, Cwd} = file:get_cwd(),
         IncJs = filename:join([Cwd, ".libs", "js", "include"]),
         IncNspr= filename:join([Cwd, ".libs", "nsprpub", "include"]),
         StaticJs = filename:join([Cwd, ".libs", "js", "lib",
@@ -134,6 +133,19 @@ PortEnv = case os:getenv("COUCHDB_STATIC") of
         ]
 end,
 
+% no support for static link on Win32/Win64
+PortEnv = case os:type() of
+    {win32, nt} ->
+        IncJS = filename:join([Cwd, ".libs", "js", "include", "js"]),
+        [
+            {"CFLAGS", "$CFLAGS /I" ++ IncJS ++
+                " /DXP_WIN /DWITHOUT_CURL /O2 /Ot /favor:blend /c /Wall"},
+            {"LDFLAGS", "$LDFLAGS .libs\\js\\lib\\mozjs185-1.0.lib"}
+        ];
+    _ ->
+        PortEnvUnix
+end,
+
 PortSpecs0 = [{filename:join(["priv", CouchJSName]), ["c_src/couch_js/*.c"]}],
 
 PortSpecs = case os:type() of
@@ -149,7 +161,17 @@ PortSpecs = case os:type() of
 
 PortInfo = [{port_env, PortEnv},
             {port_specs, PortSpecs},
-            {pre_hooks, [{compile, "./build_spidermonkey.sh"}]},
-            {post_hooks, [{clean, "./build_spidermonkey.sh clean"}]}],
+            {pre_hooks, [
+                {"(linux|solaris|freebsd|netbsd|openbsd|dragonfly|darwin)",
+                    compile, "./build_spidermonkey.sh"},
+                {"(win32|win64)", compile,
+                    "powershell ./build_spidermonkey.ps1"}
+            ]},
+            {post_hooks, [
+                {"(linux|solaris|freebsd|netbsd|openbsd|dragonfly|darwin)",
+                    clean, "./build_spidermonkey.sh clean"},
+                {"(win32|win64)", clean,
+                    "powershell ./build_spidermonkey.ps1 -clean"}
+            ]}],
 
 lists:keymerge(1,lists:keysort(1, PortInfo), lists:keysort(1, CONFIG)).

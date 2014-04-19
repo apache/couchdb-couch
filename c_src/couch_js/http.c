@@ -15,7 +15,9 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <unistd.h>
+#ifndef _WIN32
+    #include <unistd.h>
+#endif
 #include <jsapi.h>
 #include "utf8.h"
 #include "util.h"
