@@ -27,7 +27,7 @@ deps() ->
         ibrowse,
         mochiweb,
         config,
-        twig
+        couch_log
     ].
 
 
@@ -57,6 +57,9 @@ start_apps([App|Rest]) ->
        start_apps(Rest);
     {error, {already_started, App}} ->
        start_apps(Rest);
+    {error, {not_started, Dep}} ->
+       application:start(Dep),
+       start_apps([App|Rest]);
     {error, _Reason} when App =:= public_key ->
        % ignore on R12B5
        start_apps(Rest);
