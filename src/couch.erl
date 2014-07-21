@@ -63,3 +63,11 @@ start_apps([App|Rest]) ->
     {error, _Reason} ->
        {error, {app_would_not_start, App}}
     end.
+
+
+couch_dispatch() ->
+    [
+        {[], couch_httpr_welcome, []},
+        {["_dbs"], couch_httpr_dbs, []},
+        {["_dbs", db_id], couch_httpr_db, []}
+    ].
