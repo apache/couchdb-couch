@@ -887,9 +887,9 @@ db_attachment_req(#httpd{method='GET',mochi_req=MochiReq}=Req, Db, DocId, FileNa
         end,
         AttFun = case ReqAcceptsAttEnc of
         false ->
-            fun couch_doc:att_foldl_decode/3;
+            fun couch_att:foldl_decode/3;
         true ->
-            fun couch_doc:att_foldl/3
+            fun couch_att:foldl/3
         end,
         couch_httpd:etag_respond(
             Req,
