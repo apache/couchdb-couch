@@ -74,7 +74,7 @@
     md5 = <<>> :: binary(),
     revpos = 0 :: non_neg_integer(),
     data :: stub | follows | binary() | {any(), any()} |
-            {follows, pid()} | fun(() -> binary()),
+            {follows, pid(), reference()} | fun(() -> binary()),
 
     %% Encoding of the attachment
     %% currently supported values are:
@@ -130,7 +130,7 @@
 %% to allow simpler handling.
 -type data_prop() :: {
     data, stub | follows | binary() | {any(), any()} |
-    {follows, pid()} | fun(() -> binary())
+    {follows, pid(), reference()} | fun(() -> binary())
 }.
 
 
@@ -247,7 +247,7 @@ merge_stubs(MemAtts, DiskAtts) ->
     merge_stubs(MemAtts, OnDisk, []).
 
 
--spec merge_stubs([att()], dict(), [att()]) -> [att()].
+-spec merge_stubs([att()], dict:dict(), [att()]) -> [att()].
 merge_stubs([Att | Rest], OnDisk, Merged) ->
     case fetch(data, Att) of
         stub ->
