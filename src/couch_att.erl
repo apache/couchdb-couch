@@ -598,7 +598,7 @@ foldl({follows, Parser, Ref}, Att, Fun, Acc) ->
         end
     end,
     try
-        foldl(DataFun, Fun, store(data, DataFun, Acc))
+        foldl(DataFun, store(data, DataFun, Att), Fun, Acc)
     after
         erlang:demonitor(ParserRef, [flush])
     end.
