@@ -26,7 +26,7 @@ init([]) ->
             worker,
             dynamic}
     ],
-    Children = SecondarySupervisors ++ [
+    Children0 = SecondarySupervisors ++ [
         begin
             {ok, {Module, Fun, Args}} = couch_util:parse_term(SpecStr),
 
@@ -39,4 +39,32 @@ init([]) ->
         end
         || {Name, SpecStr}
         <- config:get("daemons"), SpecStr /= ""],
+    Children = [{
+        hash_fun_lru,
+        {ets_lru, start_link, [hash_fun_lru, lru_opts()]},
+        permanent,
+        5000,
+        worker,
+        [ets_lru]
+    }|Children0],
     {ok, {{one_for_one, 50, 3600}, Children}}.
+
+lru_opts() ->
+    case application:get_env(couch, hash_fun_lru_max_objects) of
+        {ok, MxObjs} when is_integer(MxObjs), MxObjs > 0 ->
+            [{max_objects, MxObjs}];
+        _ ->
+            []
+    end ++
+    case application:get_env(couch, hash_fun_lru_max_size) of
+        {ok, MxSize} when is_integer(MxSize), MxSize > 0 ->
+            [{max_size, MxSize}];
+        _ ->
+            []
+    end ++
+    case application:get_env(couch, hash_fun_lru_max_lifetime) of
+        {ok, MxLT} when is_integer(MxLT), MxLT > 0 ->
+            [{max_lifetime, MxLT}];
+        _ ->
+            []
+    end.
