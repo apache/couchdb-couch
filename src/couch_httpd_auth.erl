@@ -75,6 +75,7 @@ default_authentication_handler(Req, AuthModule) ->
             nil ->
                 throw({unauthorized, <<"Name or password is incorrect.">>});
             UserProps ->
+                reject_if_two_factor(UserProps),
                 UserName = ?l2b(User),
                 Password = ?l2b(Pass),
                 case authenticate(Password, UserProps) of
@@ -287,6 +288,7 @@ handle_session_req(#httpd{method='POST', mochi_req=MochiReq}=Req, AuthModule) ->
     end,
     case authenticate(Password, UserProps) of
         true ->
+            verify_two_factor(UserProps, Form),
             UserProps2 = maybe_upgrade_password_hash(UserName, Password, UserProps, AuthModule),
             % setup the session cookie
             Secret = ?l2b(ensure_cookie_auth_secret()),
@@ -430,3 +432,45 @@ max_age() ->
                 config:get("couch_httpd_auth", "timeout", "600")),
             [{max_age, Timeout}]
     end.
+
+reject_if_two_factor(User) ->
+    case get_two_factor_config(User) of
+        undefined ->
+            ok;
+        _ ->
+            throw({unauthorized, <<"Name or password is incorrect.">>})
+    end.
+
+verify_two_factor(User, Form) ->
+    case get_two_factor_config(User) of
+        undefined ->
+            ok;
+        {Props} ->
+            Key = couch_util:get_value(<<"key">>, Props),
+            Token = ?l2b(couch_util:get_value("token", Form, "")),
+            verify_token(Key, Token)
+    end.
+
+get_two_factor_config(User) ->
+    couch_util:get_value(<<"2f">>, User).
+
+verify_token(Key, Token) ->
+    Now = make_cookie_time(),
+    Tokens = [generate_token(Key, Now - 30),
+              generate_token(Key, Now),
+              generate_token(Key, Now + 30)],
+    %% evaluate all tokens in constant time
+    Match = lists:foldl(fun(T, Acc) -> couch_util:verify(T, Token) or Acc end,
+                        false, Tokens),
+    case Match of
+        true ->
+            ok;
+        _ ->
+            throw({unauthorized, <<"Name or password is incorrect.">>})
+    end.
+
+generate_token(Key, Timestamp) ->
+    integer_to_binary(couch_totp:generate(Key, Timestamp, 30, 6)).
+
+integer_to_binary(Int) when is_integer(Int) ->
+    ?l2b(integer_to_list(Int)).
