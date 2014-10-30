@@ -15,10 +15,29 @@
 -include_lib("eunit/include/eunit.hrl").
 
 test_vector_test() ->
-    Key = <<"12345678901234567890">>,
-    ?assertEqual(94287082, couch_totp:generate(Key, 59, 30)),
-    ?assertEqual(07081804, couch_totp:generate(Key, 1111111109, 30)),
-    ?assertEqual(14050471, couch_totp:generate(Key, 1111111111, 30)),
-    ?assertEqual(89005924, couch_totp:generate(Key, 1234567890, 30)),
-    ?assertEqual(69279037, couch_totp:generate(Key, 2000000000, 30)),
-    ?assertEqual(65353130, couch_totp:generate(Key, 20000000000, 30)).
+    ShaKey = <<"12345678901234567890">>,
+    Sha256Key = <<"12345678901234567890123456789012">>,
+    Sha512Key = <<"1234567890123456789012345678901234567890123456789012345678901234">>,
+    ?assertEqual(94287082, couch_totp:generate(sha, ShaKey, 59, 30, 8)),
+    ?assertEqual(46119246, couch_totp:generate(sha256, Sha256Key, 59, 30, 8)),
+    ?assertEqual(90693936, couch_totp:generate(sha512, Sha512Key, 59, 30, 8)),
+
+    ?assertEqual(07081804, couch_totp:generate(sha, ShaKey, 1111111109, 30, 8)),
+    ?assertEqual(68084774, couch_totp:generate(sha256, Sha256Key, 1111111109, 30, 8)),
+    ?assertEqual(25091201, couch_totp:generate(sha512, Sha512Key, 1111111109, 30, 8)),
+
+    ?assertEqual(14050471, couch_totp:generate(sha, ShaKey, 1111111111, 30, 8)),
+    ?assertEqual(67062674, couch_totp:generate(sha256, Sha256Key, 1111111111, 30, 8)),
+    ?assertEqual(99943326, couch_totp:generate(sha512, Sha512Key, 1111111111, 30, 8)),
+
+    ?assertEqual(89005924, couch_totp:generate(sha, ShaKey, 1234567890, 30, 8)),
+    ?assertEqual(91819424, couch_totp:generate(sha256, Sha256Key, 1234567890, 30, 8)),
+    ?assertEqual(93441116, couch_totp:generate(sha512, Sha512Key, 1234567890, 30, 8)),
+
+    ?assertEqual(69279037, couch_totp:generate(sha, ShaKey, 2000000000, 30, 8)),
+    ?assertEqual(90698825, couch_totp:generate(sha256, Sha256Key, 2000000000, 30, 8)),
+    ?assertEqual(38618901, couch_totp:generate(sha512, Sha512Key, 2000000000, 30, 8)),
+
+    ?assertEqual(65353130, couch_totp:generate(sha, ShaKey, 20000000000, 30, 8)),
+    ?assertEqual(77737706, couch_totp:generate(sha256, Sha256Key, 20000000000, 30, 8)),
+    ?assertEqual(47863826, couch_totp:generate(sha512, Sha512Key, 20000000000, 30, 8)).

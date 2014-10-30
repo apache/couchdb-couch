@@ -12,14 +12,11 @@
 
 -module(couch_hotp).
 
--export([generate/2, generate/3]).
+-export([generate/4]).
 
-generate(Key, Counter) when is_binary(Key), is_integer(Counter) ->
-    generate(Key, Counter, 6).
-
-generate(Key, Counter, OutputLen)
-  when is_binary(Key), is_integer(Counter), is_integer(OutputLen) ->
-    Hmac = crypto:sha_mac(Key, <<Counter:64>>),
+generate(Alg, Key, Counter, OutputLen)
+  when is_atom(Alg), is_binary(Key), is_integer(Counter), is_integer(OutputLen) ->
+    Hmac = crypto:hmac(Alg, Key, <<Counter:64>>),
     Offset = binary:last(Hmac) band 16#f,
     Code =
         ((binary:at(Hmac, Offset) band 16#7f) bsl 24) +

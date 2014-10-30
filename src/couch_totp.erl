@@ -12,12 +12,12 @@
 
 -module(couch_totp).
 
--export([generate/3, generate/4]).
+-export([generate/5]).
 
-generate(Key, CounterSecs, StepSecs) ->
-    generate(Key, CounterSecs, StepSecs, 8).
-
-generate(Key, CounterSecs, StepSecs, OutputLen)
-  when is_binary(Key), is_integer(CounterSecs), is_integer(StepSecs),
+generate(Alg, Key, CounterSecs, StepSecs, OutputLen)
+  when is_atom(Alg),
+       is_binary(Key),
+       is_integer(CounterSecs),
+       is_integer(StepSecs),
        is_integer(OutputLen) ->
-    couch_hotp:generate(Key, CounterSecs div StepSecs, OutputLen).
+    couch_hotp:generate(Alg, Key, CounterSecs div StepSecs, OutputLen).

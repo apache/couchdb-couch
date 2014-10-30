@@ -470,7 +470,7 @@ verify_token(Key, Token) ->
     end.
 
 generate_token(Key, Timestamp) ->
-    integer_to_binary(couch_totp:generate(Key, Timestamp, 30, 6)).
+    integer_to_binary(couch_totp:generate(sha, Key, Timestamp, 30, 6)).
 
 integer_to_binary(Int) when is_integer(Int) ->
     ?l2b(integer_to_list(Int)).
