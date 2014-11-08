@@ -192,7 +192,7 @@ handle_config_req(#httpd{method='POST', path_parts=[_, <<"_reload">>]}=Req) ->
 handle_config_req(#httpd{method=Method, path_parts=[_, Section, Key]}=Req)
       when (Method == 'PUT') or (Method == 'DELETE') ->
     ok = couch_httpd:verify_is_server_admin(Req),
-    Persist = couch_httpd:header_value(Req, "X-Couch-Persist") /= "false",
+    Persist = couch_httpd:header_value(Req, "X-CouchDB-Persist") /= "false",
     case config:get(<<"httpd">>, <<"config_whitelist">>, null) of
         null ->
             % No whitelist; allow all changes.

@@ -27,7 +27,7 @@
 
 special_test_authentication_handler(Req) ->
     case header_value(Req, "WWW-Authenticate") of
-    "X-Couch-Test-Auth " ++ NamePass ->
+    "X-CouchDB-Test-Auth " ++ NamePass ->
         % NamePass is a colon separated string: "joe schmoe:a password".
         [Name, Pass] = re:split(NamePass, ":", [{return, list}, {parts, 2}]),
         case {Name, Pass} of
@@ -41,7 +41,7 @@ special_test_authentication_handler(Req) ->
         end,
         Req#httpd{user_ctx=#user_ctx{name=?l2b(Name)}};
     _ ->
-        % No X-Couch-Test-Auth credentials sent, give admin access so the
+        % No X-CouchDB-Test-Auth credentials sent, give admin access so the
         % previous authentication can be restored after the test
         Req#httpd{user_ctx=#user_ctx{roles=[<<"_admin">>]}}
     end.
@@ -137,11 +137,11 @@ proxy_authentification_handler(Req) ->
     
 proxy_auth_user(Req) ->
     XHeaderUserName = config:get("couch_httpd_auth", "x_auth_username",
-                                "X-Auth-CouchDB-UserName"),
+                                "X-CouchDB-Auth-UserName"),
     XHeaderRoles = config:get("couch_httpd_auth", "x_auth_roles",
-                                "X-Auth-CouchDB-Roles"),
+                                "X-CouchDB-Auth-Roles"),
     XHeaderToken = config:get("couch_httpd_auth", "x_auth_token",
-                                "X-Auth-CouchDB-Token"),
+                                "X-CouchDB-Auth-Token"),
     case header_value(Req, XHeaderUserName) of
         undefined -> nil;
         UserName ->
