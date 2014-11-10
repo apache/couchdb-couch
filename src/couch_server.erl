@@ -124,7 +124,9 @@ maybe_add_sys_db_callbacks(DbName, Options) ->
     IsReplicatorDb = DbName == config:get("replicator", "db", "_replicator") orelse
 	path_ends_with(DbName, <<"_replicator">>),
     IsUsersDb = DbName ==config:get("couch_httpd_auth", "authentication_db", "_users") orelse
-	path_ends_with(DbName, <<"_users">>),
+	path_ends_with(DbName, <<"_users">>) orelse
+        binary_to_list(mem3:dbname(DbName)) ==
+        config:get("chttpd_auth", "authentication_db", "_users"),
     if
 	DbName == DbsDbName ->
 	    [sys_db | Options];
