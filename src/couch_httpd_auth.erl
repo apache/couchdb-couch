@@ -367,14 +367,11 @@ maybe_upgrade_password_hash(UserName, Password, UserProps, AuthModule) ->
     IsAdmin = lists:member(<<"_admin">>, couch_util:get_value(<<"roles">>, UserProps, [])),
     case {IsAdmin, couch_util:get_value(<<"password_scheme">>, UserProps, <<"simple">>)} of
     {false, <<"simple">>} ->
-        DbName = ?l2b(config:get("couch_httpd_auth", "authentication_db", "_users")),
-        couch_util:with_db(DbName, fun(UserDb) ->
-            UserProps2 = proplists:delete(<<"password_sha">>, UserProps),
-            UserProps3 = [{<<"password">>, Password} | UserProps2],
-            NewUserDoc = couch_doc:from_json_obj({UserProps3}),
-            {ok, _NewRev} = couch_db:update_doc(UserDb, NewUserDoc, []),
-            AuthModule:get_user_creds(UserName)
-        end);
+        UserProps2 = proplists:delete(<<"password_sha">>, UserProps),
+        UserProps3 = [{<<"password">>, Password} | UserProps2],
+        NewUserDoc = couch_doc:from_json_obj({UserProps3}),
+        {ok, _NewRev} = AuthModule:update_auth_doc(NewUserDoc),
+        AuthModule:get_user_creds(UserName);
     _ ->
         UserProps
     end.
