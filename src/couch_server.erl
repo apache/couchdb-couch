@@ -122,26 +122,26 @@ maybe_add_sys_db_callbacks(DbName, Options) ->
     DbsDbName = config:get("mem3", "shard_db", "dbs"),
     NodesDbName = config:get("mem3", "shard_db", "nodes"),
     IsReplicatorDb = DbName == config:get("replicator", "db", "_replicator") orelse
-	path_ends_with(DbName, <<"_replicator">>),
+        path_ends_with(DbName, <<"_replicator">>),
     IsUsersDb = DbName ==config:get("couch_httpd_auth", "authentication_db", "_users") orelse
-	path_ends_with(DbName, <<"_users">>) orelse
-        binary_to_list(mem3:dbname(DbName)) ==
-        config:get("chttpd_auth", "authentication_db", "_users"),
+        path_ends_with(DbName, <<"_users">>) orelse
+            binary_to_list(mem3:dbname(DbName)) ==
+            config:get("chttpd_auth", "authentication_db", "_users"),
     if
-	DbName == DbsDbName ->
-	    [sys_db | Options];
-	DbName == NodesDbName ->
-	    [sys_db | Options];
-	IsReplicatorDb ->
-	    [{before_doc_update, fun couch_replicator_manager:before_doc_update/2},
-	     {after_doc_read, fun couch_replicator_manager:after_doc_read/2},
-	     sys_db | Options];
-	IsUsersDb ->
-	    [{before_doc_update, fun couch_users_db:before_doc_update/2},
-	     {after_doc_read, fun couch_users_db:after_doc_read/2},
-	     sys_db | Options];
-	true ->
-	    Options
+        DbName == DbsDbName ->
+            [sys_db | Options];
+        DbName == NodesDbName ->
+            [sys_db | Options];
+        IsReplicatorDb ->
+            [{before_doc_update, fun couch_replicator_manager:before_doc_update/2},
+             {after_doc_read, fun couch_replicator_manager:after_doc_read/2},
+             sys_db | Options];
+        IsUsersDb ->
+            [{before_doc_update, fun couch_users_db:before_doc_update/2},
+             {after_doc_read, fun couch_users_db:after_doc_read/2},
+             sys_db | Options];
+        true ->
+            Options
     end.
 
 path_ends_with(Path, Suffix) ->
