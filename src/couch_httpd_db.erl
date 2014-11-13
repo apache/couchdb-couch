@@ -489,6 +489,29 @@ db_doc_req(#httpd{method='DELETE'}=Req, Db, DocId) ->
     end;
 
 db_doc_req(#httpd{method = 'GET', mochi_req = MochiReq} = Req, Db, DocId) ->
+    case DocId of
+    <<"_design/", _/binary>> ->
+        DbName = mem3:dbname(Db#db.name),
+        AuthDbName = ?l2b(config:get("couch_httpd_auth", "authentication_db")),
+        case AuthDbName of
+        DbName ->
+            % in the authentication database, design doc access are admin-only.
+            %{SecProps} = fabric:get_security(DbName),
+            %case (catch couch_db:check_is_admin(Db#db{security=SecProps})) of
+            case (catch couch_db:check_is_admin(Db)) of
+            ok ->
+                ok;
+            _ ->
+                throw({forbidden,
+                    <<"Only administrators can view design docs in the users database.">>})
+            end;
+        _Else ->
+            % on other databases, design doc access is free for all.
+            ok
+        end;
+    _Else ->
+        ok
+    end,
     #doc_query_args{
         rev = Rev,
         open_revs = Revs,

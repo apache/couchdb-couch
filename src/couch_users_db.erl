@@ -73,11 +73,8 @@ save_doc(#doc{body={Body}} = Doc) ->
         Doc#doc{body={Body3}}
     end.
 
-% If the doc is a design doc
-%   If the request's userCtx identifies an admin
-%     -> return doc
-%   Else
-%     -> 403 // Forbidden
+% If the doc is a design doc return it and relay on the http layer to restrict
+% access to admins
 % If the request's userCtx identifies an admin
 %   -> return doc
 % If the request's userCtx.name doesn't match the doc's name
@@ -85,13 +82,7 @@ save_doc(#doc{body={Body}} = Doc) ->
 % Else
 %   -> return doc
 after_doc_read(#doc{id = <<?DESIGN_DOC_PREFIX, _/binary>>} = Doc, Db) ->
-    case (catch couch_db:check_is_admin(Db)) of
-    ok ->
-        Doc;
-    _ ->
-        throw({forbidden,
-        <<"Only administrators can view design docs in the users database.">>})
-    end;
+    Doc;
 after_doc_read(Doc, #db{user_ctx = UserCtx} = Db) ->
     #user_ctx{name=Name} = UserCtx,
     DocName = get_doc_name(Doc),
