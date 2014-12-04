@@ -25,6 +25,8 @@
 -export([handle_config_change/5]).
 -export([handle_db_event/3]).
 
+-export([update_auth_doc/1]).
+
 -include_lib("couch/include/couch_db.hrl").
 -include("couch_js_functions.hrl").
 
@@ -455,3 +457,9 @@ auth_design_doc(DocId) ->
         {<<"validate_doc_update">>, ?AUTH_DB_DOC_VALIDATE_FUNCTION}
     ],
     {ok, couch_doc:from_json_obj({DocProps})}.
+
+update_auth_doc(Doc) ->
+    DbName = ?l2b(config:get("couch_httpd_auth", "authentication_db", "_users")),
+    couch_util:with_db(DbName, fun(UserDb) ->
+        couch_db:update_doc(UserDb, Doc, [])
+    end).
