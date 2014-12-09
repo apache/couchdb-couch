@@ -995,14 +995,14 @@ copy_doc_attachments(#db{fd = SrcFd} = SrcDb, SrcSp, DestFd, Processed) ->
         BinInfos0
     end,
     % copy the bin values
-    NewBinInfos = lists:map(
-        fun({Name, Type, BinSp, AttLen, RevPos, ExpectedMd5}) ->
+    {NewBinInfos, NewProcessed} = lists:mapfoldr(
+        fun({Name, Type, BinSp, AttLen, RevPos, ExpectedMd5}, Dict) ->
             % 010 UPGRADE CODE
             {NewBinSp, AttLen, AttLen, ActualMd5, _IdentityMd5} =
                 couch_stream:copy_to_new_stream(SrcFd, BinSp, DestFd),
             check_md5(ExpectedMd5, ActualMd5),
-            {Name, Type, NewBinSp, AttLen, AttLen, RevPos, ExpectedMd5, identity};
-        ({Name, Type, BinSp, AttLen, DiskLen, RevPos, ExpectedMd5, Enc1}) ->
+            {{Name, Type, NewBinSp, AttLen, AttLen, RevPos, ExpectedMd5, identity}, Dict};
+        ({Name, Type, BinSp, AttLen, DiskLen, RevPos, ExpectedMd5, Enc1}, Dict) ->
             {NewBinSp, AttLen, _, ActualMd5, _IdentityMd5} =
                 couch_stream:copy_to_new_stream(SrcFd, BinSp, DestFd),
             check_md5(ExpectedMd5, ActualMd5),
@@ -1016,9 +1016,9 @@ copy_doc_attachments(#db{fd = SrcFd} = SrcDb, SrcSp, DestFd, Processed) ->
             _ ->
                 Enc1
             end,
-            {Name, Type, NewBinSp, AttLen, DiskLen, RevPos, ExpectedMd5, Enc}
-        end, BinInfos),
-    {BodyData, NewBinInfos, Processed}.
+            {{Name, Type, NewBinSp, AttLen, DiskLen, RevPos, ExpectedMd5, Enc}, Dict}
+        end, Processed, BinInfos),
+    {BodyData, NewBinInfos, NewProcessed}.
 
 merge_lookups(Infos, []) ->
     Infos;
