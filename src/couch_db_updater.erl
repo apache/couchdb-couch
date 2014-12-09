@@ -985,7 +985,7 @@ sync_header(Db, NewHeader) ->
         waiting_delayed_commit=nil
     }.
 
-copy_doc_attachments(#db{fd = SrcFd} = SrcDb, SrcSp, DestFd) ->
+copy_doc_attachments(#db{fd = SrcFd} = SrcDb, SrcSp, DestFd, Processed) ->
     {ok, {BodyData, BinInfos0}} = couch_db:read_doc(SrcDb, SrcSp),
     BinInfos = case BinInfos0 of
     _ when is_binary(BinInfos0) ->
@@ -1018,7 +1018,7 @@ copy_doc_attachments(#db{fd = SrcFd} = SrcDb, SrcSp, DestFd) ->
             end,
             {Name, Type, NewBinSp, AttLen, DiskLen, RevPos, ExpectedMd5, Enc}
         end, BinInfos),
-    {BodyData, NewBinInfos}.
+    {BodyData, NewBinInfos, Processed}.
 
 merge_lookups(Infos, []) ->
     Infos;
@@ -1044,10 +1044,11 @@ copy_docs(Db, #db{fd = DestFd} = NewDb, MixedInfos, Retry) ->
         A =< B
     end, merge_lookups(MixedInfos, LookupResults)),
 
-    NewInfos1 = lists:map(fun(Info) ->
-        {NewRevTree, FinalAcc} = couch_key_tree:mapfold(fun
-            (_Rev, #leaf{ptr=Sp}=Leaf, leaf, SizesAcc) ->
-                {Body, AttInfos} = copy_doc_attachments(Db, Sp, DestFd),
+    {NewInfos1, _} = lists:mapfoldl(fun(Info, Acc) ->
+        {NewRevTree, {FinalAcc, D}} = couch_key_tree:mapfold(fun
+            (_Rev, #leaf{ptr=Sp}=Leaf, leaf, {SizesAcc, Processed}) ->
+                {Body, AttInfos, NewProcessed} =
+                    copy_doc_attachments(Db, Sp, DestFd, Processed),
                 SummaryChunk = make_doc_summary(NewDb, {Body, AttInfos}),
                 ExternalSize = ?term_size(SummaryChunk),
                 {ok, Pos, SummarySize} = couch_file:append_raw_chunk(
@@ -1061,22 +1062,22 @@ copy_docs(Db, #db{fd = DestFd} = NewDb, MixedInfos, Retry) ->
                     },
                     atts = AttSizes
                 },
-                {NewLeaf, add_sizes(leaf, NewLeaf, SizesAcc)};
-            (_Rev, _Leaf, branch, SizesAcc) ->
-                {?REV_MISSING, SizesAcc}
-        end, {0, 0, []}, Info#full_doc_info.rev_tree),
+                {NewLeaf, {add_sizes(leaf, NewLeaf, SizesAcc), NewProcessed}};
+            (_Rev, _Leaf, branch, {SizesAcc, Processed}) ->
+                {?REV_MISSING, {SizesAcc, Processed}}
+        end, {{0, 0, []}, Acc}, Info#full_doc_info.rev_tree),
         {FinalAS, FinalES, FinalAtts} = FinalAcc,
         TotalAttSize = lists:foldl(fun({_, S}, A) -> S + A end, 0, FinalAtts),
         NewActiveSize = FinalAS + TotalAttSize,
         NewExternalSize = FinalES + TotalAttSize,
-        Info#full_doc_info{
+        {Info#full_doc_info{
             rev_tree = NewRevTree,
             sizes = #size_info{
                 active = NewActiveSize,
                 external = NewExternalSize
             }
-        }
-    end, NewInfos0),
+        }, D}
+    end, dict:new(), NewInfos0),
 
     NewInfos = stem_full_doc_infos(Db, NewInfos1),
     RemoveSeqs =
