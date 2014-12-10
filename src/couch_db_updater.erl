@@ -998,14 +998,12 @@ copy_doc_attachments(#db{fd = SrcFd} = SrcDb, SrcSp, DestFd, Processed) ->
     {NewBinInfos, NewProcessed} = lists:mapfoldr(
         fun({Name, Type, BinSp, AttLen, RevPos, ExpectedMd5}, Dict) ->
             % 010 UPGRADE CODE
-            {NewBinSp, AttLen, AttLen, ActualMd5, _IdentityMd5} =
-                couch_stream:copy_to_new_stream(SrcFd, BinSp, DestFd),
-            check_md5(ExpectedMd5, ActualMd5),
-            {{Name, Type, NewBinSp, AttLen, AttLen, RevPos, ExpectedMd5, identity}, Dict};
+            {{NewBinSp, AttLen}, NewDict} =
+                maybe_copy_att_data(ExpectedMd5, SrcFd, BinSp, DestFd, Dict),
+            {{Name, Type, NewBinSp, AttLen, AttLen, RevPos, ExpectedMd5, identity}, NewDict};
         ({Name, Type, BinSp, AttLen, DiskLen, RevPos, ExpectedMd5, Enc1}, Dict) ->
-            {NewBinSp, AttLen, _, ActualMd5, _IdentityMd5} =
-                couch_stream:copy_to_new_stream(SrcFd, BinSp, DestFd),
-            check_md5(ExpectedMd5, ActualMd5),
+            {{NewBinSp, AttLen}, NewDict} =
+                maybe_copy_att_data(ExpectedMd5, SrcFd, BinSp, DestFd, Dict),
             Enc = case Enc1 of
             true ->
                 % 0110 UPGRADE CODE
@@ -1016,9 +1014,21 @@ copy_doc_attachments(#db{fd = SrcFd} = SrcDb, SrcSp, DestFd, Processed) ->
             _ ->
                 Enc1
             end,
-            {{Name, Type, NewBinSp, AttLen, DiskLen, RevPos, ExpectedMd5, Enc}, Dict}
+            {{Name, Type, NewBinSp, AttLen, DiskLen, RevPos, ExpectedMd5, Enc}, NewDict}
         end, Processed, BinInfos),
     {BodyData, NewBinInfos, NewProcessed}.
+
+maybe_copy_att_data(ExpectedMd5, SrcFd, BinSp, DestFd, Processed) ->
+    case dict:find(ExpectedMd5, Processed) of
+        error ->
+            {NewBinSp, AttLen, _, ActualMd5, _IdentityMd5} =
+                couch_stream:copy_to_new_stream(SrcFd, BinSp, DestFd),
+            check_md5(ExpectedMd5, ActualMd5),
+            Value = {NewBinSp, AttLen},
+            {Value, dict:store(ExpectedMd5, Value, Processed)};
+        {ok, Value} ->
+            {Value, Processed}
+    end.
 
 merge_lookups(Infos, []) ->
     Infos;
