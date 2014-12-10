@@ -986,14 +986,7 @@ sync_header(Db, NewHeader) ->
     }.
 
 copy_doc_attachments(#db{fd = SrcFd} = SrcDb, SrcSp, DestFd, Processed) ->
-    {ok, {BodyData, BinInfos0}} = couch_db:read_doc(SrcDb, SrcSp),
-    BinInfos = case BinInfos0 of
-    _ when is_binary(BinInfos0) ->
-        couch_compress:decompress(BinInfos0);
-    _ when is_list(BinInfos0) ->
-        % pre 1.2 file format
-        BinInfos0
-    end,
+    {BodyData, BinInfos} = read_doc_with_atts(SrcDb, SrcSp),
     % copy the bin values
     {NewBinInfos, NewProcessed} = lists:mapfoldr(
         fun({Name, Type, BinSp, AttLen, RevPos, ExpectedMd5}, Dict) ->
@@ -1029,6 +1022,17 @@ maybe_copy_att_data(ExpectedMd5, SrcFd, BinSp, DestFd, Processed) ->
         {ok, Value} ->
             {Value, Processed}
     end.
+
+read_doc_with_atts(SrcDb, SrcSp) ->
+    {ok, {BodyData, BinInfos0}} = couch_db:read_doc(SrcDb, SrcSp),
+    BinInfos = case BinInfos0 of
+    _ when is_binary(BinInfos0) ->
+        couch_compress:decompress(BinInfos0);
+    _ when is_list(BinInfos0) ->
+        % pre 1.2 file format
+        BinInfos0
+    end,
+    {BodyData, BinInfos}.
 
 merge_lookups(Infos, []) ->
     Infos;
