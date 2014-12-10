@@ -74,7 +74,7 @@ should_not_duplicate_inline_atts({Host, DbName}) ->
         ?assertEqual(2, count_unique_atts(DbName)),
         couch_db:start_compact(Db),
         couch_db:wait_for_compaction(Db),
-        ?assertEqual(2, count_unique_atts(DbName))
+        ?assertEqual(1, count_unique_atts(DbName))
     end).
 
 create_inline_text_att(DbName, Id) ->
