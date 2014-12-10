@@ -1025,10 +1025,9 @@ maybe_copy_att_data(ExpectedMd5, SrcFd, BinSp, DestFd, Processed) ->
 
 read_doc_with_atts(SrcDb, SrcSp) ->
     {ok, {BodyData, BinInfos0}} = couch_db:read_doc(SrcDb, SrcSp),
-    BinInfos = case BinInfos0 of
-    _ when is_binary(BinInfos0) ->
+    BinInfos = if is_binary(BinInfos0) ->
         couch_compress:decompress(BinInfos0);
-    _ when is_list(BinInfos0) ->
+    true ->
         % pre 1.2 file format
         BinInfos0
     end,
