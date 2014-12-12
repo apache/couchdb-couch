@@ -988,7 +988,7 @@ sync_header(Db, NewHeader) ->
 copy_doc_attachments(#db{fd = SrcFd} = SrcDb, SrcSp, DestFd, Processed) ->
     {BodyData, BinInfos} = read_doc_with_atts(SrcDb, SrcSp),
     % copy the bin values
-    {NewBinInfos, NewProcessed} = lists:mapfoldr(
+    {NewBinInfos, NewProcessed} = lists:mapfoldl(
         fun({Name, Type, BinSp, AttLen, RevPos, ExpectedMd5}, ProcAcc) ->
             % 010 UPGRADE CODE
             {{NewBinSp, AttLen}, NewProcAcc} =
