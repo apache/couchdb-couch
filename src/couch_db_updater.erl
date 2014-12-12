@@ -676,7 +676,7 @@ flush_trees(#db{fd = Fd} = Db,
             _ ->
                 {Value, SizesAcc}
             end
-        end, {0, 0, []}, Unflushed),
+        end, add_sizes_acc(), Unflushed),
     {FinalAS, FinalES, FinalAtts} = FinalAcc,
     TotalAttSize = lists:foldl(fun({_, S}, A) -> S + A end, 0, FinalAtts),
     NewInfo = InfoUnflushed#full_doc_info{
@@ -688,6 +688,8 @@ flush_trees(#db{fd = Fd} = Db,
     },
     flush_trees(Db, RestUnflushed, [NewInfo | AccFlushed]).
 
+add_sizes_acc() ->
+    {0, 0, []}.
 add_sizes(Type, #leaf{sizes=Sizes, atts=AttSizes}, Acc) ->
     % Maybe upgrade from disk_size only
     #size_info{
@@ -1078,7 +1080,7 @@ copy_docs(Db, #db{fd = DestFd} = NewDb, MixedInfos, Retry) ->
                 {NewLeaf, {add_sizes(leaf, NewLeaf, SizesAcc), NewProcessed}};
             (_Rev, _Leaf, branch, {SizesAcc, Processed}) ->
                 {?REV_MISSING, {SizesAcc, Processed}}
-        end, {{0, 0, []}, Acc}, Info#full_doc_info.rev_tree),
+        end, {add_sizes_acc(), Acc}, Info#full_doc_info.rev_tree),
         {FinalAS, FinalES, FinalAtts} = FinalAcc,
         TotalAttSize = lists:foldl(fun({_, S}, A) -> S + A end, 0, FinalAtts),
         NewActiveSize = FinalAS + TotalAttSize,
