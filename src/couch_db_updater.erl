@@ -989,14 +989,14 @@ copy_doc_attachments(#db{fd = SrcFd} = SrcDb, SrcSp, DestFd, Processed) ->
     {BodyData, BinInfos} = read_doc_with_atts(SrcDb, SrcSp),
     % copy the bin values
     {NewBinInfos, NewProcessed} = lists:mapfoldr(
-        fun({Name, Type, BinSp, AttLen, RevPos, ExpectedMd5}, Dict) ->
+        fun({Name, Type, BinSp, AttLen, RevPos, ExpectedMd5}, ProcAcc) ->
             % 010 UPGRADE CODE
-            {{NewBinSp, AttLen}, NewDict} =
-                maybe_copy_att_data(ExpectedMd5, SrcFd, BinSp, DestFd, Dict),
-            {{Name, Type, NewBinSp, AttLen, AttLen, RevPos, ExpectedMd5, identity}, NewDict};
-        ({Name, Type, BinSp, AttLen, DiskLen, RevPos, ExpectedMd5, Enc1}, Dict) ->
-            {{NewBinSp, AttLen}, NewDict} =
-                maybe_copy_att_data(ExpectedMd5, SrcFd, BinSp, DestFd, Dict),
+            {{NewBinSp, AttLen}, NewProcAcc} =
+                maybe_copy_att_data(ExpectedMd5, SrcFd, BinSp, DestFd, ProcAcc),
+            {{Name, Type, NewBinSp, AttLen, AttLen, RevPos, ExpectedMd5, identity}, NewProcAcc};
+        ({Name, Type, BinSp, AttLen, DiskLen, RevPos, ExpectedMd5, Enc1}, ProcAcc) ->
+            {{NewBinSp, AttLen}, NewProcAcc} =
+                maybe_copy_att_data(ExpectedMd5, SrcFd, BinSp, DestFd, ProcAcc),
             Enc = case Enc1 of
             true ->
                 % 0110 UPGRADE CODE
@@ -1007,7 +1007,7 @@ copy_doc_attachments(#db{fd = SrcFd} = SrcDb, SrcSp, DestFd, Processed) ->
             _ ->
                 Enc1
             end,
-            {{Name, Type, NewBinSp, AttLen, DiskLen, RevPos, ExpectedMd5, Enc}, NewDict}
+            {{Name, Type, NewBinSp, AttLen, DiskLen, RevPos, ExpectedMd5, Enc}, NewProcAcc}
         end, Processed, BinInfos),
     {BodyData, NewBinInfos, NewProcessed}.
 
