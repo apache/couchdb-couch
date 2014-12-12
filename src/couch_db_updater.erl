@@ -1058,7 +1058,7 @@ copy_docs(Db, #db{fd = DestFd} = NewDb, MixedInfos, Retry) ->
     end, merge_lookups(MixedInfos, LookupResults)),
 
     {NewInfos1, _} = lists:mapfoldl(fun(Info, Acc) ->
-        {NewRevTree, {FinalAcc, D}} = couch_key_tree:mapfold(fun
+        {NewRevTree, {FinalAcc, GlobalProcessed}} = couch_key_tree:mapfold(fun
             (_Rev, #leaf{ptr=Sp}=Leaf, leaf, {SizesAcc, Processed}) ->
                 {Body, AttInfos, NewProcessed} =
                     copy_doc_attachments(Db, Sp, DestFd, Processed),
@@ -1089,7 +1089,7 @@ copy_docs(Db, #db{fd = DestFd} = NewDb, MixedInfos, Retry) ->
                 active = NewActiveSize,
                 external = NewExternalSize
             }
-        }, D}
+        }, GlobalProcessed}
     end, dict:new(), NewInfos0),
 
     NewInfos = stem_full_doc_infos(Db, NewInfos1),
