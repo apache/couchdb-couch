@@ -677,30 +677,36 @@ flush_trees(#db{fd = Fd} = Db,
                 {Value, SizesAcc}
             end
         end, add_sizes_acc(), Unflushed),
-    {FinalAS, FinalES, FinalAtts} = FinalAcc,
-    TotalAttSize = lists:foldl(fun({_, S}, A) -> S + A end, 0, FinalAtts),
+    {FinalSizeInfoTree, FinalSizeInfoAtts} = FinalAcc,
     NewInfo = InfoUnflushed#full_doc_info{
         rev_tree = Flushed,
-        sizes = #size_info{
-            active = FinalAS + TotalAttSize,
-            external = FinalES + TotalAttSize
-        }
+        sizes = add_sizes(FinalSizeInfoTree, FinalSizeInfoAtts)
     },
     flush_trees(Db, RestUnflushed, [NewInfo | AccFlushed]).
 
 add_sizes_acc() ->
-    {0, 0, []}.
-add_sizes(Type, #leaf{sizes=Sizes, atts=AttSizes}, Acc) ->
+    {#size_info{}, #size_info{}}.
+add_sizes(Type, #leaf{sizes=Sizes, atts=AttSizes}, {TreeSizesAcc, AttSizesAcc}) ->
     % Maybe upgrade from disk_size only
     #size_info{
         active = ActiveSize,
         external = ExternalSize
     } = upgrade_sizes(Sizes),
-    {ASAcc, ESAcc, AttsAcc} = Acc,
-    NewASAcc = ActiveSize + ASAcc,
-    NewESAcc = ESAcc + if Type == leaf -> ExternalSize; true -> 0 end,
-    NewAttsAcc = lists:umerge(AttSizes, AttsAcc),
-    {NewASAcc, NewESAcc, NewAttsAcc}.
+    ExternalDelta = if Type == leaf -> ExternalSize; true -> 0 end,
+    NewTreeSizesAcc = add_sizes(TreeSizesAcc, #size_info{
+        active = ActiveSize,
+        external = ExternalDelta}),
+    AttSize = lists:foldl(fun({_, S}, A) -> S + A end, 0, AttSizes),
+    NewAttSizesAcc = add_sizes(AttSizesAcc, #size_info{
+        active = AttSize,
+        external = AttSize}),
+    {NewTreeSizesAcc, NewAttSizesAcc}.
+
+add_sizes(#size_info{} = A, #size_info{} = B) ->
+    #size_info{
+       active = A#size_info.active + B#size_info.active,
+       external = A#size_info.external + B#size_info.external
+    }.
 
 send_result(Client, Doc, NewResult) ->
     % used to send a result to the client
@@ -1081,16 +1087,10 @@ copy_docs(Db, #db{fd = DestFd} = NewDb, MixedInfos, Retry) ->
             (_Rev, _Leaf, branch, {SizesAcc, Processed}) ->
                 {?REV_MISSING, {SizesAcc, Processed}}
         end, {add_sizes_acc(), Acc}, Info#full_doc_info.rev_tree),
-        {FinalAS, FinalES, FinalAtts} = FinalAcc,
-        TotalAttSize = lists:foldl(fun({_, S}, A) -> S + A end, 0, FinalAtts),
-        NewActiveSize = FinalAS + TotalAttSize,
-        NewExternalSize = FinalES + TotalAttSize,
+        {FinalSizeInfoTree, FinalSizeInfoAtts} = FinalAcc,
         {Info#full_doc_info{
             rev_tree = NewRevTree,
-            sizes = #size_info{
-                active = NewActiveSize,
-                external = NewExternalSize
-            }
+            sizes = add_sizes(FinalSizeInfoTree, FinalSizeInfoAtts)
         }, GlobalProcessed}
     end, dict:new(), NewInfos0),
 
