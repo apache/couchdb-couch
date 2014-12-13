@@ -999,11 +999,11 @@ copy_doc_attachments(#db{fd = SrcFd} = SrcDb, SrcSp, DestFd, Processed) ->
     {NewBinInfos, NewProcessed} = lists:mapfoldl(
         fun({Name, Type, BinSp, AttLen, RevPos, ExpectedMd5}, ProcAcc) ->
             % 010 UPGRADE CODE
-            {{NewBinSp, AttLen}, NewProcAcc} =
+            {{NewBinSp, AttLen}, NewProcAcc, IsNew} =
                 maybe_copy_att_data(ExpectedMd5, SrcFd, BinSp, DestFd, ProcAcc),
-            {{Name, Type, NewBinSp, AttLen, AttLen, RevPos, ExpectedMd5, identity}, NewProcAcc};
+            {{IsNew, {Name, Type, NewBinSp, AttLen, AttLen, RevPos, ExpectedMd5, identity}}, NewProcAcc};
         ({Name, Type, BinSp, AttLen, DiskLen, RevPos, ExpectedMd5, Enc1}, ProcAcc) ->
-            {{NewBinSp, AttLen}, NewProcAcc} =
+            {{NewBinSp, AttLen}, NewProcAcc, IsNew} =
                 maybe_copy_att_data(ExpectedMd5, SrcFd, BinSp, DestFd, ProcAcc),
             Enc = case Enc1 of
             true ->
@@ -1015,7 +1015,7 @@ copy_doc_attachments(#db{fd = SrcFd} = SrcDb, SrcSp, DestFd, Processed) ->
             _ ->
                 Enc1
             end,
-            {{Name, Type, NewBinSp, AttLen, DiskLen, RevPos, ExpectedMd5, Enc}, NewProcAcc}
+            {{IsNew, {Name, Type, NewBinSp, AttLen, DiskLen, RevPos, ExpectedMd5, Enc}}, NewProcAcc}
         end, Processed, BinInfos),
     {BodyData, NewBinInfos, NewProcessed}.
 
@@ -1026,9 +1026,9 @@ maybe_copy_att_data(ExpectedMd5, SrcFd, BinSp, DestFd, Processed) ->
                 couch_stream:copy_to_new_stream(SrcFd, BinSp, DestFd),
             check_md5(ExpectedMd5, ActualMd5),
             Value = {NewBinSp, AttLen},
-            {Value, dict:store(ExpectedMd5, Value, Processed)};
+            {Value, dict:store(ExpectedMd5, Value, Processed), true};
         {ok, Value} ->
-            {Value, Processed}
+            {Value, Processed, false}
     end.
 
 read_doc_with_atts(SrcDb, SrcSp) ->
@@ -1068,13 +1068,14 @@ copy_docs(Db, #db{fd = DestFd} = NewDb, MixedInfos, Retry) ->
     {NewInfos1, _} = lists:mapfoldl(fun(Info, Acc) ->
         {NewRevTree, {FinalAcc, GlobalProcessed}} = couch_key_tree:mapfold(fun
             (_Rev, #leaf{ptr=Sp}=Leaf, leaf, {SizesAcc, Processed}) ->
-                {Body, AttInfos, NewProcessed} =
+                {Body, Atts, NewProcessed} =
                     copy_doc_attachments(Db, Sp, DestFd, Processed),
+                AttInfos = [AttInfo || {_, AttInfo} <- Atts],
                 SummaryChunk = make_doc_summary(NewDb, {Body, AttInfos}),
                 ExternalSize = ?term_size(SummaryChunk),
                 {ok, Pos, SummarySize} = couch_file:append_raw_chunk(
                     DestFd, SummaryChunk),
-                AttSizes = [{element(3,A), element(4,A)} || A <- AttInfos],
+                AttSizes = [{element(3,A), element(4,A)} || {_New, A} <- Atts],
                 NewLeaf = Leaf#leaf{
                     ptr = Pos,
                     sizes = #size_info{
