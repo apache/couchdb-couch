@@ -59,6 +59,7 @@ compaction_tests() ->
                     foreach,
                     fun setup/0, fun teardown/1,
                     [
+                        fun should_preserve_att_when_delete_shared/1,
                         fun should_not_duplicate_inline_atts/1
                     ]
                 }
@@ -93,6 +94,42 @@ should_not_duplicate_inline_atts({Host, DbName}) ->
         ?assert(SizeAfterCompaction < SizeBeforeCompaction)
 
     end).
+
+should_preserve_att_when_delete_shared({Host, DbName}) ->
+    ?_test(begin
+        Rev = create_inline_text_att(DbName, <<"doc1">>),
+        create_inline_text_att(DbName, <<"doc2">>),
+        ?assertEqual(2, count_unique_atts(DbName)),
+
+        {ok, Db1} = couch_db:open_int(list_to_binary(DbName), []),
+
+        couch_db:start_compact(Db1),
+        couch_db:wait_for_compaction(Db1),
+        couch_db:close(Db1),
+
+        {ok, Db2} = couch_db:open_int(list_to_binary(DbName), []),
+        ok = delete_doc(Db2, <<"doc1">>, Rev),
+
+        couch_db:start_compact(Db2),
+        couch_db:wait_for_compaction(Db2),
+        couch_db:close(Db2),
+
+        {ok, Db3} = couch_db:open_int(list_to_binary(DbName), []),
+        AttData = attach_data(),
+        ?assertMatch({_, AttData}, read_attach(Db3, <<"doc2">>))
+    end).
+
+delete_doc(Db, Id, Rev) ->
+    %% Until COUCHDB-2515 is fixed we cannot use couch_doc:delete_doc
+    %%{ok, _Result} = couch_db:delete_doc(Db, Id, [{0, []}]),
+    EJson = body_with_attach(Id),
+    EJson1 = couch_util:json_apply_field({<<"_deleted">>, true}, EJson),
+    RevStr = couch_doc:rev_to_str(Rev),
+    EJson2 = couch_util:json_apply_field({<<"_rev">>, RevStr}, EJson1),
+    Doc = couch_doc:from_json_obj(EJson2),
+    {ok, _Rev} = couch_db:update_doc(Db, Doc, []),
+    ok.
+
 
 create_inline_text_att(DbName, Id) ->
     {ok, Db} = couch_db:open_int(list_to_binary(DbName), []),
