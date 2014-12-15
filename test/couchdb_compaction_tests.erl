@@ -70,11 +70,28 @@ should_not_duplicate_inline_atts({Host, DbName}) ->
     ?_test(begin
         create_inline_text_att(DbName, <<"doc1">>),
         create_inline_text_att(DbName, <<"doc2">>),
-        {ok, Db} = couch_db:open_int(list_to_binary(DbName), []),
         ?assertEqual(2, count_unique_atts(DbName)),
-        couch_db:start_compact(Db),
-        couch_db:wait_for_compaction(Db),
-        ?assertEqual(1, count_unique_atts(DbName))
+
+        {ok, Db1} = couch_db:open_int(list_to_binary(DbName), []),
+
+        SizeBeforeCompaction = db_file_size(Db1),
+
+        couch_db:start_compact(Db1),
+        couch_db:wait_for_compaction(Db1),
+        couch_db:close(Db1),
+
+        ?assertEqual(1, count_unique_atts(DbName)),
+
+        {ok, Db2} = couch_db:open_int(list_to_binary(DbName), []),
+        AttData = attach_data(),
+        ?assertMatch({_, AttData}, read_attach(Db2, <<"doc1">>)),
+        ?assertMatch({_, AttData}, read_attach(Db2, <<"doc2">>)),
+
+
+        SizeAfterCompaction = db_file_size(Db2),
+
+        ?assert(SizeAfterCompaction < SizeBeforeCompaction)
+
     end).
 
 create_inline_text_att(DbName, Id) ->
@@ -95,18 +112,33 @@ count_unique_atts(DbName) ->
     couch_db:close(Db),
     sets:size(sets:from_list(Atts)).
 
+db_file_size(#db{filepath = FilePath}) ->
+    {ok, Data} = file:read_file(FilePath),
+    size(Data).
+
+read_attach(Db, DocId) ->
+    {ok, #doc{atts = [Att]} = D} = couch_db:open_doc(Db, DocId, []),
+    {Content, _} = couch_att:foldl_decode(Att, fun(A, Acc) -> {A, Acc} end, []),
+    {Att, iolist_to_binary(Content)}.
+
+
 doc_with_attach(Id) ->
     EJson = body_with_attach(Id),
     couch_doc:from_json_obj(EJson).
 
 body_with_attach(Id) ->
-    Data = <<"Test file content">>,
     {[
         {<<"_id">>, Id},
         {<<"_attachments">>, {[
             {?ATT_TXT_NAME, {[
                 {<<"content_type">>, <<"text/plain">>},
-                {<<"data">>, base64:encode(Data)}
+                {<<"data">>, base64:encode(attach_data())}
             ]}
         }]}}
     ]}.
+
+attach_data() ->
+    %% We need file bigger than 4096 (gzipped)
+    random:seed({1,2,3}),
+    list_to_binary(lists:map(
+        fun(_) -> $A + random:uniform(25) end, lists:seq(0, 50000))).
