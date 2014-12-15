@@ -708,6 +708,12 @@ add_sizes(#size_info{} = A, #size_info{} = B) ->
        external = A#size_info.external + B#size_info.external
     }.
 
+subtract_cached_atts_sizes(CachedAttsSizes, {TreeSizesAcc, AttSizesAcc}) ->
+    NewAttSizesAcc = lists:foldl(fun(Size, #size_info{active = Active} = SI) ->
+        SI#size_info{active = Active - Size}
+    end, AttSizesAcc, CachedAttsSizes),
+    {TreeSizesAcc, NewAttSizesAcc}.
+
 send_result(Client, Doc, NewResult) ->
     % used to send a result to the client
     catch(Client ! {result, self(), {doc_tag(Doc), NewResult}}).
@@ -1076,6 +1082,7 @@ copy_docs(Db, #db{fd = DestFd} = NewDb, MixedInfos, Retry) ->
                 {ok, Pos, SummarySize} = couch_file:append_raw_chunk(
                     DestFd, SummaryChunk),
                 AttSizes = [{element(3,A), element(4,A)} || {_New, A} <- Atts],
+                CachedSizes = [element(4,A) || {false, A} <- Atts],
                 NewLeaf = Leaf#leaf{
                     ptr = Pos,
                     sizes = #size_info{
@@ -1084,7 +1091,9 @@ copy_docs(Db, #db{fd = DestFd} = NewDb, MixedInfos, Retry) ->
                     },
                     atts = AttSizes
                 },
-                {NewLeaf, {add_sizes(leaf, NewLeaf, SizesAcc), NewProcessed}};
+                SizesAcc1 = add_sizes(leaf, NewLeaf, SizesAcc),
+                NewSizesAcc = subtract_cached_atts_sizes(CachedSizes, SizesAcc1),
+                {NewLeaf, {NewSizesAcc, NewProcessed}};
             (_Rev, _Leaf, branch, {SizesAcc, Processed}) ->
                 {?REV_MISSING, {SizesAcc, Processed}}
         end, {add_sizes_acc(), Acc}, Info#full_doc_info.rev_tree),
