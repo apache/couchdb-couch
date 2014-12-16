@@ -262,12 +262,17 @@ find_missing([{Id, Revs}|RestIdRevs], [{ok, FullInfo} | RestLookupInfo]) ->
 find_missing([{Id, Revs}|RestIdRevs], [not_found | RestLookupInfo]) ->
     [{Id, Revs, []} | find_missing(RestIdRevs, RestLookupInfo)].
 
-get_doc_info(Db, Id) ->
-    case get_full_doc_info(Db, Id) of
-    {ok, DocInfo} ->
-        {ok, couch_doc:to_doc_info(DocInfo)};
-    Else ->
-        Else
+
+get_doc_info(#db{local_tree = Tree}, <<?LOCAL_DOC_PREFIX, _/binary>> = Id) ->
+    get_doc_info(Tree, Id);
+get_doc_info(#db{id_tree = Tree}, Id) ->
+    get_doc_info(Tree, Id);
+get_doc_info(Tree, Id) ->
+    case couch_btree:lookup(Tree, [Id]) of
+        [{ok, DocInfo}] ->
+            {ok, couch_doc:to_doc_info(DocInfo)};
+        [Else] ->
+            Else
     end.
 
 %   returns {ok, DocInfo} or not_found
