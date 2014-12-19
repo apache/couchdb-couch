@@ -60,7 +60,8 @@ compaction_tests() ->
                     fun setup/0, fun teardown/1,
                     [
                         fun should_preserve_att_when_delete_shared/1,
-                        fun should_not_duplicate_inline_atts/1
+                        fun should_not_duplicate_inline_atts/1,
+                        fun should_calcualte_active_size_on_doc_update/1
                     ]
                 }
             ]
@@ -119,6 +120,38 @@ should_preserve_att_when_delete_shared({_Host, DbName}) ->
         ?assertMatch({_, AttData}, read_attach(Db3, <<"doc2">>))
     end).
 
+%% 1. Create doc A with attachment
+%% 2. Create doc B with same attachment that will be de-duped
+%% 3. Compact the database
+%% 4. Check our active size
+%% 5. Modify doc B (in a way that keeps the de-duped attachment without copying it)
+%% 6. Check that active size isn't increased by more than the attachment size
+
+should_calcualte_active_size_on_doc_update({_Host, DbName}) ->
+    ?_test(begin
+        create_inline_text_att(DbName, <<"doc1">>),
+        create_inline_text_att(DbName, <<"doc2">>),
+        ?assertEqual(2, count_unique_atts(DbName)),
+
+        {ok, Db1} = couch_db:open_int(list_to_binary(DbName), []),
+
+        couch_db:start_compact(Db1),
+        couch_db:wait_for_compaction(Db1),
+        couch_db:close(Db1),
+
+        {ok, Db2} = couch_db:open_int(list_to_binary(DbName), []),
+        {_, ActiveSizeBeforeUpdate, _} = sizes(Db2),
+        modify_doc(DbName, <<"doc2">>),
+
+        {ok, Db3} = couch_db:reopen(Db2),
+
+        {_, ActiveSizeAfterUpdate, _} = sizes(Db2),
+        SizesAfterUpdate = sizes(Db3),
+        couch_db:close(Db3),
+
+        ?assert((ActiveSizeAfterUpdate - ActiveSizeBeforeUpdate) < ?ATT_SIZE)
+    end).
+
 delete_doc(Db, Id, Rev) ->
     %% Until COUCHDB-2515 is fixed we cannot use couch_doc:delete_doc
     %%{ok, _Result} = couch_db:delete_doc(Db, Id, [{0, []}]),
@@ -130,6 +163,14 @@ delete_doc(Db, Id, Rev) ->
     {ok, _Rev} = couch_db:update_doc(Db, Doc, []),
     ok.
 
+sizes(Db) ->
+    {ok, Info} = couch_db:get_db_info(Db),
+    {Sizes} = proplists:get_value(sizes, Info),
+    {
+        proplists:get_value(file, Sizes),
+        proplists:get_value(active, Sizes),
+        proplists:get_value(external, Sizes)
+    }.
 
 create_inline_text_att(DbName, Id) ->
     {ok, Db} = couch_db:open_int(list_to_binary(DbName), []),
@@ -162,6 +203,16 @@ read_attach(Db, DocId) ->
 doc_with_attach(Id) ->
     EJson = body_with_attach(Id),
     couch_doc:from_json_obj(EJson).
+
+modify_doc(DbName, Id) ->
+    {ok, Db} = couch_db:open_int(list_to_binary(DbName), []),
+    {ok, #doc{revs = Revs, body = Body}} = couch_db:open_doc(Db, Id, [ejson_body]),
+    RevStr = couch_doc:rev_to_str(Revs),
+    EJson = couch_util:json_apply_field({<<"_rev">>, RevStr}, Body),
+    Doc = couch_doc:from_json_obj(EJson),
+    {ok, Rev} = couch_db:update_doc(Db, Doc, []),
+    couch_db:close(Db),
+    Rev.
 
 body_with_attach(Id) ->
     {[
