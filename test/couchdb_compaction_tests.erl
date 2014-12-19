@@ -16,7 +16,7 @@
 -include_lib("couch/include/couch_db.hrl").
 
 -define(ATT_TXT_NAME, <<"test_file.txt">>).
-
+-define(ATT_SIZE, 123456).
 
 start() ->
     ok = test_util:start_couch(),
@@ -178,4 +178,4 @@ attach_data() ->
     %% We need file bigger than 4096 (gzipped)
     random:seed({1,2,3}),
     list_to_binary(lists:map(
-        fun(_) -> $A + random:uniform(25) end, lists:seq(0, 50000))).
+        fun(_) -> $A + random:uniform(25) end, lists:seq(0, ?ATT_SIZE))).
