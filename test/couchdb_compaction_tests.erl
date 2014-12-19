@@ -67,7 +67,7 @@ compaction_tests() ->
         }
     ].
 
-should_not_duplicate_inline_atts({Host, DbName}) ->
+should_not_duplicate_inline_atts({_Host, DbName}) ->
     ?_test(begin
         create_inline_text_att(DbName, <<"doc1">>),
         create_inline_text_att(DbName, <<"doc2">>),
@@ -95,7 +95,7 @@ should_not_duplicate_inline_atts({Host, DbName}) ->
 
     end).
 
-should_preserve_att_when_delete_shared({Host, DbName}) ->
+should_preserve_att_when_delete_shared({_Host, DbName}) ->
     ?_test(begin
         Rev = create_inline_text_att(DbName, <<"doc1">>),
         create_inline_text_att(DbName, <<"doc2">>),
