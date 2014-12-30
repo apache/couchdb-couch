@@ -676,29 +676,43 @@ flush_trees(#db{fd = Fd} = Db,
             _ ->
                 {Value, SizesAcc}
             end
-        end, {0, 0, []}, Unflushed),
-    {FinalAS, FinalES, FinalAtts} = FinalAcc,
-    TotalAttSize = lists:foldl(fun({_, S}, A) -> S + A end, 0, FinalAtts),
+        end, add_sizes_acc(), Unflushed),
+    {FinalSizeInfoTree, FinalSizeInfoAtts} = FinalAcc,
     NewInfo = InfoUnflushed#full_doc_info{
         rev_tree = Flushed,
-        sizes = #size_info{
-            active = FinalAS + TotalAttSize,
-            external = FinalES + TotalAttSize
-        }
+        sizes = add_sizes(FinalSizeInfoTree, FinalSizeInfoAtts)
     },
     flush_trees(Db, RestUnflushed, [NewInfo | AccFlushed]).
 
-add_sizes(Type, #leaf{sizes=Sizes, atts=AttSizes}, Acc) ->
+add_sizes_acc() ->
+    {#size_info{}, #size_info{}}.
+add_sizes(Type, #leaf{sizes=Sizes, atts=AttSizes}, {TreeSizesAcc, AttSizesAcc}) ->
     % Maybe upgrade from disk_size only
     #size_info{
         active = ActiveSize,
         external = ExternalSize
     } = upgrade_sizes(Sizes),
-    {ASAcc, ESAcc, AttsAcc} = Acc,
-    NewASAcc = ActiveSize + ASAcc,
-    NewESAcc = ESAcc + if Type == leaf -> ExternalSize; true -> 0 end,
-    NewAttsAcc = lists:umerge(AttSizes, AttsAcc),
-    {NewASAcc, NewESAcc, NewAttsAcc}.
+    ExternalDelta = if Type == leaf -> ExternalSize; true -> 0 end,
+    NewTreeSizesAcc = add_sizes(TreeSizesAcc, #size_info{
+        active = ActiveSize,
+        external = ExternalDelta}),
+    AttSize = lists:foldl(fun({_, S}, A) -> S + A end, 0, AttSizes),
+    NewAttSizesAcc = add_sizes(AttSizesAcc, #size_info{
+        active = AttSize,
+        external = AttSize}),
+    {NewTreeSizesAcc, NewAttSizesAcc}.
+
+add_sizes(#size_info{} = A, #size_info{} = B) ->
+    #size_info{
+       active = A#size_info.active + B#size_info.active,
+       external = A#size_info.external + B#size_info.external
+    }.
+
+subtract_cached_atts_sizes(CachedAttsSizes, {TreeSizesAcc, AttSizesAcc}) ->
+    NewAttSizesAcc = lists:foldl(fun(Size, #size_info{active = Active} = SI) ->
+        SI#size_info{active = Active - Size}
+    end, AttSizesAcc, CachedAttsSizes),
+    {TreeSizesAcc, NewAttSizesAcc}.
 
 send_result(Client, Doc, NewResult) ->
     % used to send a result to the client
@@ -985,27 +999,18 @@ sync_header(Db, NewHeader) ->
         waiting_delayed_commit=nil
     }.
 
-copy_doc_attachments(#db{fd = SrcFd} = SrcDb, SrcSp, DestFd) ->
-    {ok, {BodyData, BinInfos0}} = couch_db:read_doc(SrcDb, SrcSp),
-    BinInfos = case BinInfos0 of
-    _ when is_binary(BinInfos0) ->
-        couch_compress:decompress(BinInfos0);
-    _ when is_list(BinInfos0) ->
-        % pre 1.2 file format
-        BinInfos0
-    end,
+copy_doc_attachments(#db{fd = SrcFd} = SrcDb, SrcSp, DestFd, Processed) ->
+    {BodyData, BinInfos} = read_doc_with_atts(SrcDb, SrcSp),
     % copy the bin values
-    NewBinInfos = lists:map(
-        fun({Name, Type, BinSp, AttLen, RevPos, ExpectedMd5}) ->
+    {NewBinInfos, NewProcessed} = lists:mapfoldl(
+        fun({Name, Type, BinSp, AttLen, RevPos, ExpectedMd5}, ProcAcc) ->
             % 010 UPGRADE CODE
-            {NewBinSp, AttLen, AttLen, ActualMd5, _IdentityMd5} =
-                couch_stream:copy_to_new_stream(SrcFd, BinSp, DestFd),
-            check_md5(ExpectedMd5, ActualMd5),
-            {Name, Type, NewBinSp, AttLen, AttLen, RevPos, ExpectedMd5, identity};
-        ({Name, Type, BinSp, AttLen, DiskLen, RevPos, ExpectedMd5, Enc1}) ->
-            {NewBinSp, AttLen, _, ActualMd5, _IdentityMd5} =
-                couch_stream:copy_to_new_stream(SrcFd, BinSp, DestFd),
-            check_md5(ExpectedMd5, ActualMd5),
+            {{NewBinSp, AttLen}, NewProcAcc, IsNew} =
+                maybe_copy_att_data(ExpectedMd5, SrcFd, BinSp, DestFd, ProcAcc),
+            {{IsNew, {Name, Type, NewBinSp, AttLen, AttLen, RevPos, ExpectedMd5, identity}}, NewProcAcc};
+        ({Name, Type, BinSp, AttLen, DiskLen, RevPos, ExpectedMd5, Enc1}, ProcAcc) ->
+            {{NewBinSp, AttLen}, NewProcAcc, IsNew} =
+                maybe_copy_att_data(ExpectedMd5, SrcFd, BinSp, DestFd, ProcAcc),
             Enc = case Enc1 of
             true ->
                 % 0110 UPGRADE CODE
@@ -1016,9 +1021,31 @@ copy_doc_attachments(#db{fd = SrcFd} = SrcDb, SrcSp, DestFd) ->
             _ ->
                 Enc1
             end,
-            {Name, Type, NewBinSp, AttLen, DiskLen, RevPos, ExpectedMd5, Enc}
-        end, BinInfos),
-    {BodyData, NewBinInfos}.
+            {{IsNew, {Name, Type, NewBinSp, AttLen, DiskLen, RevPos, ExpectedMd5, Enc}}, NewProcAcc}
+        end, Processed, BinInfos),
+    {BodyData, NewBinInfos, NewProcessed}.
+
+maybe_copy_att_data(ExpectedMd5, SrcFd, BinSp, DestFd, Processed) ->
+    case dict:find(ExpectedMd5, Processed) of
+        error ->
+            {NewBinSp, AttLen, _, ActualMd5, _IdentityMd5} =
+                couch_stream:copy_to_new_stream(SrcFd, BinSp, DestFd),
+            check_md5(ExpectedMd5, ActualMd5),
+            Value = {NewBinSp, AttLen},
+            {Value, dict:store(ExpectedMd5, Value, Processed), true};
+        {ok, Value} ->
+            {Value, Processed, false}
+    end.
+
+read_doc_with_atts(SrcDb, SrcSp) ->
+    {ok, {BodyData, BinInfos0}} = couch_db:read_doc(SrcDb, SrcSp),
+    BinInfos = if is_binary(BinInfos0) ->
+        couch_compress:decompress(BinInfos0);
+    true ->
+        % pre 1.2 file format
+        BinInfos0
+    end,
+    {BodyData, BinInfos}.
 
 merge_lookups(Infos, []) ->
     Infos;
@@ -1044,15 +1071,18 @@ copy_docs(Db, #db{fd = DestFd} = NewDb, MixedInfos, Retry) ->
         A =< B
     end, merge_lookups(MixedInfos, LookupResults)),
 
-    NewInfos1 = lists:map(fun(Info) ->
-        {NewRevTree, FinalAcc} = couch_key_tree:mapfold(fun
-            (_Rev, #leaf{ptr=Sp}=Leaf, leaf, SizesAcc) ->
-                {Body, AttInfos} = copy_doc_attachments(Db, Sp, DestFd),
+    {NewInfos1, _} = lists:mapfoldl(fun(Info, Acc) ->
+        {NewRevTree, {FinalAcc, GlobalProcessed}} = couch_key_tree:mapfold(fun
+            (_Rev, #leaf{ptr=Sp}=Leaf, leaf, {SizesAcc, Processed}) ->
+                {Body, Atts, NewProcessed} =
+                    copy_doc_attachments(Db, Sp, DestFd, Processed),
+                AttInfos = [AttInfo || {_, AttInfo} <- Atts],
                 SummaryChunk = make_doc_summary(NewDb, {Body, AttInfos}),
                 ExternalSize = ?term_size(SummaryChunk),
                 {ok, Pos, SummarySize} = couch_file:append_raw_chunk(
                     DestFd, SummaryChunk),
-                AttSizes = [{element(3,A), element(4,A)} || A <- AttInfos],
+                AttSizes = [{element(3,A), element(4,A)} || {_New, A} <- Atts],
+                CachedSizes = [element(4,A) || {false, A} <- Atts],
                 NewLeaf = Leaf#leaf{
                     ptr = Pos,
                     sizes = #size_info{
@@ -1061,22 +1091,18 @@ copy_docs(Db, #db{fd = DestFd} = NewDb, MixedInfos, Retry) ->
                     },
                     atts = AttSizes
                 },
-                {NewLeaf, add_sizes(leaf, NewLeaf, SizesAcc)};
-            (_Rev, _Leaf, branch, SizesAcc) ->
-                {?REV_MISSING, SizesAcc}
-        end, {0, 0, []}, Info#full_doc_info.rev_tree),
-        {FinalAS, FinalES, FinalAtts} = FinalAcc,
-        TotalAttSize = lists:foldl(fun({_, S}, A) -> S + A end, 0, FinalAtts),
-        NewActiveSize = FinalAS + TotalAttSize,
-        NewExternalSize = FinalES + TotalAttSize,
-        Info#full_doc_info{
+                SizesAcc1 = add_sizes(leaf, NewLeaf, SizesAcc),
+                NewSizesAcc = subtract_cached_atts_sizes(CachedSizes, SizesAcc1),
+                {NewLeaf, {NewSizesAcc, NewProcessed}};
+            (_Rev, _Leaf, branch, {SizesAcc, Processed}) ->
+                {?REV_MISSING, {SizesAcc, Processed}}
+        end, {add_sizes_acc(), Acc}, Info#full_doc_info.rev_tree),
+        {FinalSizeInfoTree, FinalSizeInfoAtts} = FinalAcc,
+        {Info#full_doc_info{
             rev_tree = NewRevTree,
-            sizes = #size_info{
-                active = NewActiveSize,
-                external = NewExternalSize
-            }
-        }
-    end, NewInfos0),
+            sizes = add_sizes(FinalSizeInfoTree, FinalSizeInfoAtts)
+        }, GlobalProcessed}
+    end, dict:new(), NewInfos0),
 
     NewInfos = stem_full_doc_infos(Db, NewInfos1),
     RemoveSeqs =

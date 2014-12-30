@@ -262,12 +262,17 @@ find_missing([{Id, Revs}|RestIdRevs], [{ok, FullInfo} | RestLookupInfo]) ->
 find_missing([{Id, Revs}|RestIdRevs], [not_found | RestLookupInfo]) ->
     [{Id, Revs, []} | find_missing(RestIdRevs, RestLookupInfo)].
 
-get_doc_info(Db, Id) ->
-    case get_full_doc_info(Db, Id) of
-    {ok, DocInfo} ->
-        {ok, couch_doc:to_doc_info(DocInfo)};
-    Else ->
-        Else
+
+get_doc_info(#db{local_tree = Tree}, <<?LOCAL_DOC_PREFIX, _/binary>> = Id) ->
+    get_doc_info(Tree, Id);
+get_doc_info(#db{id_tree = Tree}, Id) ->
+    get_doc_info(Tree, Id);
+get_doc_info(Tree, Id) ->
+    case couch_btree:lookup(Tree, [Id]) of
+        [{ok, DocInfo}] ->
+            {ok, couch_doc:to_doc_info(DocInfo)};
+        [Else] ->
+            Else
     end.
 
 %   returns {ok, DocInfo} or not_found
@@ -1210,12 +1215,27 @@ enum_docs_since(Db, SinceSeq, InFun, Acc, Options) ->
             [{start_key, SinceSeq + 1} | Options]),
     {ok, enum_docs_since_reduce_to_count(LastReduction), AccOut}.
 
-enum_docs(Db, InFun, InAcc, Options) ->
+enum_docs(Db, InFun, InAcc, Options0) ->
+    {NS, Options} = extract_namespace(Options0),
     FoldFun = skip_deleted(InFun),
-    {ok, LastReduce, OutAcc} = couch_btree:fold(
-        Db#db.id_tree, FoldFun, InAcc, Options),
-    {ok, enum_docs_reduce_to_count(LastReduce), OutAcc}.
+    case NS of
+        all ->
+            {ok, LastReduce, OutAcc} = couch_btree:fold(
+                Db#db.id_tree, FoldFun, InAcc, Options),
+            {ok, enum_docs_reduce_to_count(LastReduce), OutAcc};
+        local ->
+            {ok, _LastReduce, OutAcc} = couch_btree:fold(
+                Db#db.local_tree, FoldFun, InAcc, Options),
+            {ok, 0, OutAcc}
+    end.
 
+extract_namespace(Options0) ->
+    case proplists:split(Options0, [namespace]) of
+        {[[{namespace, NS}]], Options} ->
+            {NS, Options};
+        {_, Options} ->
+            {all, Options}
+    end.
 
 %%% Internal function %%%
 open_doc_revs_int(Db, IdRevs, Options) ->
