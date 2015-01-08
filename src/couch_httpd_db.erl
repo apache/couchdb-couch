@@ -302,7 +302,7 @@ db_req(#httpd{method='POST',path_parts=[_,<<"_bulk_docs">>]}=Req, Db) ->
     undefined ->
         send_error(Req, 400, <<"bad_request">>, <<"Missing JSON list of 'docs'">>);
     DocsArray ->
-        case couch_httpd:header_value(Req, "X-Couch-Full-Commit") of
+        case couch_httpd:header_value(Req, "X-CouchDB-Full-Commit") of
         "true" ->
             Options = [full_commit];
         "false" ->
@@ -737,7 +737,7 @@ update_doc(Req, Db, DocId, Doc, Headers) ->
     update_doc(Req, Db, DocId, Doc, Headers, UpdateType).
 
 update_doc(Req, Db, DocId, #doc{deleted=Deleted}=Doc, Headers, UpdateType) ->
-    case couch_httpd:header_value(Req, "X-Couch-Full-Commit") of
+    case couch_httpd:header_value(Req, "X-CouchDB-Full-Commit") of
     "true" ->
         Options = [full_commit];
     "false" ->
