@@ -116,6 +116,14 @@ create(DbName, Options0) ->
 delete(DbName, Options) ->
     gen_server:call(couch_server, {delete, DbName, Options}, infinity).
 
+is_users_db(DbName) ->
+    IsUsersDbPreds = [
+        fun() -> DbName == config:get("couch_httpd_auth", "authentication_db", "_users") end,
+        fun() -> path_ends_with(DbName, <<"_users">>) end,
+        fun() -> binary_to_list(mem3:dbname(DbName)) == config:get("chttpd_auth", "authentication_db", "_users") end
+    ],
+    lists:any(fun(F) -> F() end, IsUsersDbPreds).
+
 maybe_add_sys_db_callbacks(DbName, Options) when is_binary(DbName) ->
     maybe_add_sys_db_callbacks(?b2l(DbName), Options);
 maybe_add_sys_db_callbacks(DbName, Options) ->
@@ -123,10 +131,7 @@ maybe_add_sys_db_callbacks(DbName, Options) ->
     NodesDbName = config:get("mem3", "shard_db", "nodes"),
     IsReplicatorDb = DbName == config:get("replicator", "db", "_replicator") orelse
         path_ends_with(DbName, <<"_replicator">>),
-    IsUsersDb = DbName ==config:get("couch_httpd_auth", "authentication_db", "_users") orelse
-        path_ends_with(DbName, <<"_users">>) orelse
-            binary_to_list(mem3:dbname(DbName)) ==
-            config:get("chttpd_auth", "authentication_db", "_users"),
+    IsUsersDb = is_users_db(DbName),
     if
         DbName == DbsDbName ->
             [sys_db | Options];
