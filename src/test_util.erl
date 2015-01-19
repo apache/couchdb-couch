@@ -20,8 +20,7 @@
 -export([request/3, request/4]).
 -export([start_couch/0, start_couch/1, start_couch/2, stop_couch/0, stop_couch/1]).
 -export([start_config/1, stop_config/1]).
--export([start_applications/1]).
-
+-export([start_applications/1, stop_applications/1]).
 
 srcdir() ->
     code:priv_dir(couch) ++ "/../../".
@@ -86,27 +85,22 @@ start_couch(ExtraApps) ->
     start_couch(?CONFIG_CHAIN, ExtraApps).
 
 start_couch(IniFiles, ExtraApps) ->
+    load_applications_with_stats(),
     ok = application:set_env(config, ini_files, IniFiles),
     ok = lager:start(),
     ok = start_applications([inets, ibrowse, ssl, config, couch] ++ ExtraApps),
-    couch_stats:reload(),
     ok.
 
+stop_applications(Apps) ->
+    [ok = application:stop(App) || App <- lists:reverse(Apps)],
+    ok.
 
 stop_couch() ->
-    ok = application:stop(couch),
-    ok = application:stop(lager),
-    ok = application:stop(goldrush),
-    ok = application:stop(config),
-    ok = application:stop(ssl),
-    ok = application:stop(ibrowse),
-    ok = application:stop(inets),
+    ok = stop_applications([inets, ibrowse, ssl, config, goldrush, lager, couch]),
     ok.
-
 
 stop_couch(_) ->
     stop_couch().
-
 
 start_applications([]) ->
     ok;
@@ -144,3 +138,12 @@ stop_config(Pid) ->
     after Timeout ->
         throw({timeout_error, config_stop})
     end.
+
+load_applications_with_stats() ->
+    Wildcard = filename:join([?BUILDDIR(), "src/*/priv/stats_descriptions.cfg"]),
+    [application:load(stats_file_to_app(File)) || File <- filelib:wildcard(Wildcard)],
+    ok.
+
+stats_file_to_app(File) ->
+    [_Desc, _Priv, App|_] = lists:reverse(filename:split(File)),
+    erlang:list_to_atom(App).
