@@ -837,7 +837,7 @@ error_info({bad_ctype, Reason}) ->
     {415, <<"bad_content_type">>, Reason};
 error_info(requested_range_not_satisfiable) ->
     {416, <<"requested_range_not_satisfiable">>, <<"Requested range not satisfiable">>};
-error_info({error, illegal_database_name, Name}) ->
+error_info({error, {illegal_database_name, Name}}) ->
     Message = "Name: '" ++ Name ++ "'. Only lowercase characters (a-z), "
         ++ "digits (0-9), and any of the characters _, $, (, ), +, -, and / "
         ++ "are allowed. Must begin with a letter.",

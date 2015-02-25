@@ -21,6 +21,7 @@
 -export([handle_cast/2,code_change/3,handle_info/2,terminate/2]).
 -export([dev_start/0,is_admin/2,has_admins/0,get_stats/0]).
 -export([close_lru/0]).
+-export([validate_dbname/1]).
 
 % config_listener api
 -export([handle_config_change/5, handle_config_terminate/3]).
@@ -36,7 +37,8 @@
     dbs_open=0,
     start_time="",
     update_lru_on_read=true,
-    lru = couch_lru:new()
+    lru = couch_lru:new(),
+    dbname_validator
     }).
 
 dev_start() ->
@@ -116,6 +118,9 @@ create(DbName, Options0) ->
 delete(DbName, Options) ->
     gen_server:call(couch_server, {delete, DbName, Options}, infinity).
 
+validate_dbname(DbName) ->
+    gen_server:call(couch_server, {validate_dbname, DbName}).
+
 maybe_add_sys_db_callbacks(DbName, Options) when is_binary(DbName) ->
     maybe_add_sys_db_callbacks(?b2l(DbName), Options);
 maybe_add_sys_db_callbacks(DbName, Options) ->
@@ -145,6 +150,8 @@ maybe_add_sys_db_callbacks(DbName, Options) ->
 path_ends_with(Path, Suffix) ->
     Suffix == lists:last(binary:split(mem3:dbname(Path), <<"/">>, [global])).
 
+check_dbname(#server{dbname_validator={M, F, A}}, DbName) ->
+    M:F(DbName, A);
 check_dbname(#server{dbname_regexp=RegExp}, DbName) ->
     case re:run(DbName, RegExp, [{capture, none}]) of
     nomatch ->
@@ -152,7 +159,7 @@ check_dbname(#server{dbname_regexp=RegExp}, DbName) ->
             "_users" -> ok;
             "_replicator" -> ok;
             _Else ->
-                {error, illegal_database_name, DbName}
+                {error, {illegal_database_name, DbName}}
             end;
     match ->
         ok
@@ -204,11 +211,13 @@ init([]) ->
     ets:new(couch_dbs, [set, protected, named_table, {keypos, #db.name}]),
     ets:new(couch_dbs_pid_to_name, [set, protected, named_table]),
     process_flag(trap_exit, true),
+
     {ok, #server{root_dir=RootDir,
                 dbname_regexp=RegExp,
                 max_dbs_open=MaxDbsOpen,
                 update_lru_on_read=UpdateLruOnRead,
-                start_time=couch_util:rfc1123_date()}}.
+                start_time=couch_util:rfc1123_date(),
+                dbname_validator=get_dbname_validator()}}.
 
 terminate(Reason, Srv) ->
     couch_log:error("couch_server terminating with ~p, state ~2048p",
@@ -229,6 +238,8 @@ handle_config_change("couchdb", "max_dbs_open", Max, _, _) when is_list(Max) ->
     {ok, gen_server:call(couch_server,{set_max_dbs_open,list_to_integer(Max)})};
 handle_config_change("couchdb", "max_dbs_open", _, _, _) ->
     {ok, gen_server:call(couch_server,{set_max_dbs_open,?MAX_DBS_OPEN})};
+handle_config_change("couchdb", "dbname_validator", _, _, _) ->
+    {ok, gen_server:call(couch_server,set_dbname_validator)};
 handle_config_change("admins", _, _, Persist, _) ->
     % spawn here so couch event manager doesn't deadlock
     {ok, spawn(fun() -> hash_admin_passwords(Persist) end)};
@@ -508,7 +519,11 @@ handle_call({db_updated, #db{}=Db}, _From, Server0) ->
     catch _:_ ->
         Server0
     end,
-    {reply, ok, Server}.
+    {reply, ok, Server};
+handle_call(set_dbname_validator, _From, Server) ->
+    {reply, ok, Server#server{dbname_validator=get_dbname_validator()}};
+handle_call({validate_dbname, DbName}, _From, Server) ->
+    {reply, check_dbname(Server, DbName), Server}.
 
 handle_cast({update_lru, DbName}, #server{lru = Lru, update_lru_on_read=true} = Server) ->
     {noreply, Server#server{lru = couch_lru:update(DbName, Lru)}};
@@ -557,4 +572,14 @@ db_closed(Server, Options) ->
     case lists:member(sys_db, Options) of
         false -> Server#server{dbs_open=Server#server.dbs_open - 1};
         true -> Server
+    end.
+
+get_dbname_validator() ->
+    case config:get("couchdb", "dbname_validator", undefined) of
+    undefined ->
+        undefined;
+    SpecStr ->
+        {ok, {M, F, A}} = couch_util:parse_term(SpecStr),
+        couch_util:validate_callback_exists(M, F, 2),
+        {M, F, A}
     end.

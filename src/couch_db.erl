@@ -32,6 +32,7 @@
 -export([reopen/1, is_system_db/1, compression/1, make_doc/5]).
 -export([load_validation_funs/1]).
 -export([check_md5/2, with_stream/3]).
+-export([validate_dbname/1]).
 
 -include_lib("couch/include/couch_db.hrl").
 
@@ -1464,3 +1465,6 @@ select_gt(V1, _V2) -> V1.
 
 select_lt(V1, V2) when V1 > V2 -> V2;
 select_lt(V1, _V2) -> V1.
+
+validate_dbname(DbName) ->
+    couch_server:validate_dbname(DbName).
