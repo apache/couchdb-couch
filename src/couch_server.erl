@@ -76,8 +76,7 @@ sup_start_link() ->
     gen_server:start_link({local, couch_server}, couch_server, [], []).
 
 
-open(DbName, Options0) ->
-    Options = maybe_add_sys_db_callbacks(DbName, Options0),
+open(DbName, Options) ->
     Ctx = couch_util:get_value(user_ctx, Options, #user_ctx{}),
     case ets:lookup(couch_dbs, DbName) of
     [#db{fd=Fd, fd_monitor=Lock} = Db] when Lock =/= locked ->
@@ -103,8 +102,7 @@ update_lru(DbName, Options) ->
 close_lru() ->
     gen_server:call(couch_server, close_lru).
 
-create(DbName, Options0) ->
-    Options = maybe_add_sys_db_callbacks(DbName, Options0),
+create(DbName, Options) ->
     case gen_server:call(couch_server, {create, DbName, Options}, infinity) of
     {ok, #db{fd=Fd} = Db} ->
         Ctx = couch_util:get_value(user_ctx, Options, #user_ctx{}),
@@ -115,35 +113,6 @@ create(DbName, Options0) ->
 
 delete(DbName, Options) ->
     gen_server:call(couch_server, {delete, DbName, Options}, infinity).
-
-maybe_add_sys_db_callbacks(DbName, Options) when is_binary(DbName) ->
-    maybe_add_sys_db_callbacks(?b2l(DbName), Options);
-maybe_add_sys_db_callbacks(DbName, Options) ->
-    DbsDbName = config:get("mem3", "shards_db", "_dbs"),
-    NodesDbName = config:get("mem3", "nodes_db", "_nodes"),
-    IsReplicatorDb = DbName == config:get("replicator", "db", "_replicator") orelse
-	path_ends_with(DbName, <<"_replicator">>),
-    IsUsersDb = DbName ==config:get("couch_httpd_auth", "authentication_db", "_users") orelse
-	path_ends_with(DbName, <<"_users">>),
-    if
-	DbName == DbsDbName ->
-	    [sys_db | Options];
-	DbName == NodesDbName ->
-	    [sys_db | Options];
-	IsReplicatorDb ->
-	    [{before_doc_update, fun couch_replicator_manager:before_doc_update/2},
-	     {after_doc_read, fun couch_replicator_manager:after_doc_read/2},
-	     sys_db | Options];
-	IsUsersDb ->
-	    [{before_doc_update, fun couch_users_db:before_doc_update/2},
-	     {after_doc_read, fun couch_users_db:after_doc_read/2},
-	     sys_db | Options];
-	true ->
-	    Options
-    end.
-
-path_ends_with(Path, Suffix) ->
-    Suffix == lists:last(binary:split(mem3:dbname(Path), <<"/">>, [global])).
 
 check_dbname(#server{dbname_regexp=RegExp}, DbName) ->
     case re:run(DbName, RegExp, [{capture, none}]) of
@@ -392,7 +361,8 @@ handle_call({open_result, DbName, Error}, {FromPid, _Tag}, Server) ->
             Server
     end,
     {reply, ok, db_closed(NewServer, Db#db.options)};
-handle_call({open, DbName, Options}, From, Server) ->
+handle_call({open, DbName, Options0}, From, Server) ->
+    Options = maybe_add_sys_db_options(DbName, Options0),
     case ets:lookup(couch_dbs, DbName) of
     [] ->
         DbNameList = binary_to_list(DbName),
@@ -419,7 +389,8 @@ handle_call({open, DbName, Options}, From, Server) ->
     [#db{} = Db] ->
         {reply, {ok, Db}, Server}
     end;
-handle_call({create, DbName, Options}, From, Server) ->
+handle_call({create, DbName, Options0}, From, Server) ->
+    Options = maybe_add_sys_db_options(DbName, Options0),
     DbNameList = binary_to_list(DbName),
     Filepath = get_full_filename(Server, DbNameList),
     case check_dbname(Server, DbNameList) of
@@ -557,3 +528,7 @@ db_closed(Server, Options) ->
         false -> Server#server{dbs_open=Server#server.dbs_open - 1};
         true -> Server
     end.
+
+maybe_add_sys_db_options(DbName, Options) ->
+    Name = couch_db:normalize_dbname(DbName),
+    couch_system_dbs:options(Name) ++ Options.
