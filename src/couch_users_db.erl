@@ -13,6 +13,7 @@
 -module(couch_users_db).
 
 -export([before_doc_update/2, after_doc_read/2, strip_non_public_fields/1]).
+-export([should_strip_public_fields/0]).
 
 -include_lib("couch/include/couch_db.hrl").
 
@@ -119,3 +120,13 @@ strip_non_public_fields(#doc{body={Props}}=Doc) ->
     Public = re:split(config:get("couch_httpd_auth", "public_fields", ""),
                       "\\s*,\\s*", [{return, binary}]),
     Doc#doc{body={[{K, V} || {K, V} <- Props, lists:member(K, Public)]}}.
+
+should_strip_public_fields() ->
+    UsersDbPublic = config:get("couch_httpd_auth", "users_db_public", "false"),
+    PublicFields = config:get("couch_httpd_auth", "public_fields"),
+    case {UsersDbPublic, PublicFields} of
+    {"true", PublicFields} when PublicFields =/= undefined ->
+        true;
+    _ ->
+        false
+    end.
