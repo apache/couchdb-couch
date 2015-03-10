@@ -19,6 +19,7 @@
 -export([start/2, stop/1]).
 
 start(_Type, _) ->
+    couch_system_dbs:subscribe(),
     case couch_sup:start_link() of
         {ok, _} = Resp ->
             Resp;

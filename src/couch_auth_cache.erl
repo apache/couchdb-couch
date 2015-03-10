@@ -69,7 +69,7 @@ get_user_creds(_Req, UserName) ->
     validate_user_creds(UserCreds).
 
 update_user_creds(_Req, UserDoc, _AuthCtx) ->
-    DbNameList = config:get("couch_httpd_auth", "authentication_db", "_users"),
+    DbNameList = couch_dbs:name("authentication_db"),
     couch_util:with_db(?l2b(DbNameList), fun(UserDb) ->
         {ok, _NewRev} = couch_db:update_doc(UserDb, UserDoc, []),
         ok
@@ -148,7 +148,7 @@ init(_) ->
     ?STATE = ets:new(?STATE, [set, protected, named_table]),
     ?BY_USER = ets:new(?BY_USER, [set, protected, named_table]),
     ?BY_ATIME = ets:new(?BY_ATIME, [ordered_set, private, named_table]),
-    AuthDbName = config:get("couch_httpd_auth", "authentication_db"),
+    AuthDbName = couch_dbs:name("authentication_db"),
     process_flag(trap_exit, true),
     ok = config:listen_for_changes(?MODULE, nil),
     {ok, Listener} = couch_event:link_listener(
@@ -270,7 +270,7 @@ clear_cache(State) ->
 
 reinit_cache(State) ->
     NewState = clear_cache(State),
-    AuthDbName = ?l2b(config:get("couch_httpd_auth", "authentication_db")),
+    AuthDbName = ?l2b(couch_dbs:name("authentication_db")),
     true = ets:insert(?STATE, {auth_db_name, AuthDbName}),
     AuthDb = open_auth_db(),
     true = ets:insert(?STATE, {auth_db, AuthDb}),
@@ -409,7 +409,7 @@ exec_if_auth_db(Fun, DefRes) ->
 
 open_auth_db() ->
     [{auth_db_name, DbName}] = ets:lookup(?STATE, auth_db_name),
-    {ok, AuthDb} = ensure_users_db_exists(DbName, [sys_db]),
+    {ok, AuthDb} = ensure_users_db_exists(DbName),
     AuthDb.
 
 
@@ -430,14 +430,14 @@ get_user_props_from_db(UserName) ->
         nil
     ).
 
-ensure_users_db_exists(DbName, Options) ->
-    Options1 = [?ADMIN_CTX, nologifmissing | Options],
-    case couch_db:open(DbName, Options1) of
+ensure_users_db_exists(DbName) ->
+    Options = [?ADMIN_CTX|couch_dbs:options(DbName)],
+    case couch_db:open(DbName, Options) of
     {ok, Db} ->
         ensure_auth_ddoc_exists(Db, <<"_design/_auth">>),
         {ok, Db};
     _Error ->
-        {ok, Db} = couch_db:create(DbName, Options1),
+        {ok, Db} = couch_db:create(DbName, Options),
         ok = ensure_auth_ddoc_exists(Db, <<"_design/_auth">>),
         {ok, Db}
     end.

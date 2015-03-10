@@ -23,7 +23,10 @@
         couch_secondary_services,
         couch_server,
         couch_sup,
-        couch_task_status
+        couch_task_status,
+        couch_dbs,
+        couch_define_db,
+        couch_system_dbs
     ]},
     {mod, {couch_app, []}},
     {applications, [

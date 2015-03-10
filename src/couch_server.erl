@@ -148,7 +148,8 @@ path_ends_with(Path, Suffix) ->
 check_dbname(#server{dbname_regexp=RegExp}, DbName) ->
     case re:run(DbName, RegExp, [{capture, none}]) of
     nomatch ->
-        case lists:member(DbName, ?SYSTEM_DATABASES) of
+        Name = couch_db:normalize_dbname(DbName),
+        case couch_system_dbs:is_system_db(Name) of
             true -> ok;
             false -> {error, illegal_database_name, DbName}
         end;
