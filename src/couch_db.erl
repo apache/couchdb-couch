@@ -33,6 +33,7 @@
 -export([load_validation_funs/1]).
 -export([check_md5/2, with_stream/3]).
 -export([normalize_dbname/1]).
+-export([before_doc_update/2]).
 
 -include_lib("couch/include/couch_db.hrl").
 
@@ -1471,3 +1472,10 @@ normalize_dbname(<<"shards/", _/binary>> = Path) ->
 normalize_dbname(DbName) ->
     DbName.
 
+before_doc_update(DbName, Docs) ->
+    case couch_system_dbs:before_doc_update(normalize_dbname(DbName)) of
+    undefined ->
+        Docs;
+    Fun ->
+        lists:map(Fun, Docs)
+    end.
