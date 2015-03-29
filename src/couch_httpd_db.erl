@@ -17,7 +17,8 @@
     db_req/2, couch_doc_open/4, handle_db_changes_req/2,
     update_doc_result_to_json/1, update_doc_result_to_json/2,
     handle_design_info_req/3, parse_copy_destination_header/1,
-    parse_changes_query/2, handle_changes_req/4]).
+    parse_changes_query/2, handle_changes_req/4,
+    maybe_add_content_disposition_headers/2]).
 
 -import(couch_httpd,
     [send_json/2,send_json/3,send_json/4,send_method_not_allowed/2,
@@ -616,14 +617,25 @@ send_doc(Req, Doc, Options) ->
     case Doc#doc.meta of
     [] ->
         DiskEtag = couch_httpd:doc_etag(Doc),
+        Headers = maybe_add_content_disposition_headers([
+            {"Etag", DiskEtag}
+        ], Options),
         % output etag only when we have no meta
         couch_httpd:etag_respond(Req, DiskEtag, fun() ->
-            send_doc_efficiently(Req, Doc, [{"ETag", DiskEtag}], Options)
+            send_doc_efficiently(Req, Doc, Headers, Options)
         end);
     _ ->
-        send_doc_efficiently(Req, Doc, [], Options)
+        Headers = maybe_add_content_disposition_headers([], Options),
+        send_doc_efficiently(Req, Doc, Headers, Options)
     end.
 
+maybe_add_content_disposition_headers(Headers, Options) ->
+    case lists:member(download, Options) of
+    true ->
+        [{"Content-Disposition", "attachment"} | Headers];
+    false ->
+        Headers
+    end.
 
 send_doc_efficiently(Req, #doc{atts=[]}=Doc, Headers, Options) ->
         send_json(Req, 200, Headers, couch_doc:to_json_obj(Doc, Options));
@@ -1099,6 +1111,9 @@ parse_doc_query(Req) ->
             Args#doc_query_args{options=Options};
         {"conflicts", "true"} ->
             Options = [conflicts | Args#doc_query_args.options],
+            Args#doc_query_args{options=Options};
+        {"download", "true"} ->
+            Options = [download | Args#doc_query_args.options],
             Args#doc_query_args{options=Options};
         {"deleted_conflicts", "true"} ->
             Options = [deleted_conflicts | Args#doc_query_args.options],
