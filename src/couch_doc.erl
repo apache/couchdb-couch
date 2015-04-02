@@ -86,6 +86,8 @@ to_json_meta(Meta) ->
             [{<<"_conflicts">>, revs_to_strs(Conflicts)}];
         ({deleted_conflicts, DConflicts}) ->
             [{<<"_deleted_conflicts">>, revs_to_strs(DConflicts)}];
+        ({r_met, Bool}) ->
+            [{<<"_r_met">>, Bool}];
         (_) ->
             []
         end, Meta).
@@ -191,6 +193,11 @@ transfer_fields([{<<"_rev">>, Rev} | Rest], #doc{revs={0, []}}=Doc) ->
 
 transfer_fields([{<<"_rev">>, _Rev} | Rest], Doc) ->
     % we already got the rev from the _revisions
+    transfer_fields(Rest,Doc);
+
+transfer_fields([{<<"_r_met">>, _Bool} | Rest], Doc) ->
+    % _r_met is informational only and has no bearing on
+    % how we'll use the document.
     transfer_fields(Rest,Doc);
 
 transfer_fields([{<<"_attachments">>, {JsonBins}} | Rest], Doc) ->
