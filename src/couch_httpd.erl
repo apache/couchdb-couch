@@ -724,7 +724,7 @@ send_json(Req, Code, Headers, Value) ->
         {"Cache-Control", "must-revalidate"}
     ],
     Body = [start_jsonp(), ?JSON_ENCODE(Value), end_jsonp(), $\n],
-    send_response(Req, Code, DefaultHeaders ++ Headers, Body).
+    send_response(Req, Code, deduplicate_headers(DefaultHeaders ++ Headers), Body).
 
 start_json_response(Req, Code) ->
     start_json_response(Req, Code, []).
@@ -735,12 +735,16 @@ start_json_response(Req, Code, Headers) ->
         {"Content-Type", negotiate_content_type(Req)},
         {"Cache-Control", "must-revalidate"}
     ],
-    {ok, Resp} = start_chunked_response(Req, Code, DefaultHeaders ++ Headers),
+    {ok, Resp} = start_chunked_response(Req, Code, deduplicate_headers(DefaultHeaders ++ Headers)),
     case start_jsonp() of
         [] -> ok;
         Start -> send_chunk(Resp, Start)
     end,
     {ok, Resp}.
+	
+deduplicate_headers(Headers) ->
+   DeduplicatedHeadersSet = lists:foldl(fun(X, Set) -> sets:add_element(X, Set) end, sets:new(), Headers),
+   sets:to_list(DeduplicatedHeadersSet).
 
 end_json_response(Resp) ->
     send_chunk(Resp, end_jsonp() ++ [$\n]),
