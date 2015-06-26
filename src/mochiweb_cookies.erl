@@ -50,9 +50,9 @@ cookie(Key, Value, Options) ->
             RawAge ->
                 When = case proplists:get_value(local_time, Options) of
                            undefined ->
-                               calendar:universal_time();
+                               calendar:local_time();
                            LocalTime ->
-                               erlang:localtime_to_universaltime(LocalTime)
+                               LocalTime
                        end,
                 Age = case RawAge < 0 of
                           true ->
@@ -116,12 +116,11 @@ quote(V0) ->
         orelse erlang:error({cookie_quoting_required, V}),
     V.
 
-add_seconds(Secs, UniversalTime) ->
-    Greg = calendar:datetime_to_gregorian_seconds(UniversalTime),
-    calendar:gregorian_seconds_to_datetime(Greg + Secs).
+add_seconds(Secs, LocalTime) ->
+    Greg = calendar:datetime_to_gregorian_seconds(LocalTime),
 
-age_to_cookie_date(Age, UniversalTime) ->
-    couch_util:rfc1123_date(add_seconds(Age, UniversalTime)).
+age_to_cookie_date(Age, LocalTime) ->
+    httpd_util:rfc1123_date(add_seconds(Age, LocalTime)).
 
 %% @spec parse_cookie(string()) -> [{K::string(), V::string()}]
 %% @doc Parse the contents of a Cookie header field, ignoring cookie
