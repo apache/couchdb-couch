@@ -116,12 +116,15 @@ delete(DbName, Options) ->
 maybe_add_sys_db_callbacks(DbName, Options) when is_binary(DbName) ->
     maybe_add_sys_db_callbacks(?b2l(DbName), Options);
 maybe_add_sys_db_callbacks(DbName, Options) ->
+    Normalized = couch_db:normalize_dbname(DbName),
+
     DbsDbName = config:get("mem3", "shards_db", "_dbs"),
     NodesDbName = config:get("mem3", "nodes_db", "_nodes"),
-    IsReplicatorDb = DbName == config:get("replicator", "db", "_replicator") orelse
-	path_ends_with(DbName, <<"_replicator">>),
-    IsUsersDb = DbName ==config:get("couch_httpd_auth", "authentication_db", "_users") orelse
-	path_ends_with(DbName, <<"_users">>),
+    IsReplicatorDb = Normalized == config:get("replicator", "db", "_replicator") orelse
+        Normalized == <<"_replicator">>,
+
+    IsUsersDb = is_usersdb(Normalized),
+
     if
 	DbName == DbsDbName ->
 	    [sys_db | Options];
@@ -139,8 +142,13 @@ maybe_add_sys_db_callbacks(DbName, Options) ->
 	    Options
     end.
 
-path_ends_with(Path, Suffix) ->
-    Suffix == couch_db:normalize_dbname(Path).
+is_usersdb(Normalized) ->
+    Candidates = [
+        ?l2b(config:get("couch_httpd_auth", "authentication_db", "_users")),
+        ?l2b(config:get("chttpd_auth", "authentication_db", "_users")),
+        <<"_users">>
+    ],
+    lists:any(fun(Name) -> Name == Normalized end, Candidates).
 
 check_dbname(#server{dbname_regexp=RegExp}, DbName) ->
     case re:run(DbName, RegExp, [{capture, none}]) of
