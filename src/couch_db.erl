@@ -1476,7 +1476,14 @@ select_gt(V1, _V2) -> V1.
 select_lt(V1, V2) when V1 > V2 -> V2;
 select_lt(V1, _V2) -> V1.
 
-normalize_dbname(<<"shards/", _/binary>> = Path) ->
+normalize_dbname(DbName) when is_list(DbName) ->
+    normalize_dbname(?l2b(DbName));
+normalize_dbname(<<"shards/", _/binary>> = Path0) ->
+    Path = strip_shard_timestamp(Path0),
     lists:last(binary:split(mem3:dbname(Path), <<"/">>, [global]));
 normalize_dbname(DbName) ->
     DbName.
+
+strip_shard_timestamp(<<"shards/", _/binary>> = Path) ->
+    [P|_] = binary:split(Path, <<".">>, [global]),
+    P.
