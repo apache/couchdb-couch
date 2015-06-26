@@ -666,7 +666,7 @@ to_universal(LocalTime) ->
 
 server_headers() ->
     [{"Server", "MochiWeb/1.0 (" ++ ?QUIP ++ ")"},
-     {"Date", httpd_util:rfc1123_date()}].
+     {"Date", couch_util_clock:rfc1123()}].
 
 make_code(X) when is_integer(X) ->
     [integer_to_list(X), [" " | httpd_util:reason_phrase(X)]];

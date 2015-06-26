@@ -118,6 +118,7 @@ quote(V0) ->
 
 add_seconds(Secs, LocalTime) ->
     Greg = calendar:datetime_to_gregorian_seconds(LocalTime),
+    calendar:gregorian_seconds_to_datetime(Greg + Secs).
 
 age_to_cookie_date(Age, LocalTime) ->
     httpd_util:rfc1123_date(add_seconds(Age, LocalTime)).
