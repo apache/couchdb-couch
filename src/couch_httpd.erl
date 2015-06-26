@@ -122,6 +122,7 @@ start_link(Name, Options) ->
     % ensure uuid is set so that concurrent replications
     % get the same value.
     couch_server:get_uuid(),
+    couch_util_clock:start_link(),
 
     Loop = fun(Req)->
         case SocketOptions of
