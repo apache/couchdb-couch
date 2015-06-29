@@ -45,9 +45,12 @@ dev_start() ->
     couch:start().
 
 get_version() ->
-    case application:get_key(couch, vsn) of
-        {ok, Version} -> Version;
-        undefined -> "0.0.0"
+    Apps = application:loaded_applications(),
+    case lists:keysearch(couch, 1, Apps) of
+    {value, {_, _, Vsn}} ->
+        Vsn;
+    false ->
+        "0.0.0"
     end.
 get_version(short) ->
   %% strip git hash from version string
