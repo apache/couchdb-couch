@@ -117,13 +117,14 @@ maybe_add_sys_db_callbacks(DbName, Options) when is_binary(DbName) ->
     maybe_add_sys_db_callbacks(?b2l(DbName), Options);
 maybe_add_sys_db_callbacks(DbName, Options) ->
     Normalized = couch_db:normalize_dbname(DbName),
+    IsShard = couch_db:is_shard(DbName),
 
     DbsDbName = config:get("mem3", "shards_db", "_dbs"),
     NodesDbName = config:get("mem3", "nodes_db", "_nodes"),
     IsReplicatorDb = Normalized == config:get("replicator", "db", "_replicator") orelse
         Normalized == <<"_replicator">>,
 
-    IsUsersDb = is_usersdb(Normalized),
+    IsUsersDb = is_usersdb(IsShard, Normalized),
 
     if
 	DbName == DbsDbName ->
@@ -142,13 +143,18 @@ maybe_add_sys_db_callbacks(DbName, Options) ->
 	    Options
     end.
 
-is_usersdb(Normalized) ->
+is_usersdb(IsShard, Normalized) ->
     Candidates = [
-        ?l2b(config:get("couch_httpd_auth", "authentication_db", "_users")),
-        ?l2b(config:get("chttpd_auth", "authentication_db", "_users")),
-        <<"_users">>
+        {false, ?l2b(config:get("couch_httpd_auth", "authentication_db", "_users"))},
+        {true, ?l2b(config:get("chttpd_auth", "authentication_db", "_users"))},
+        {false, <<"_users">>}
     ],
-    lists:any(fun(Name) -> Name == Normalized end, Candidates).
+    is_usersdb(IsShard, Normalized, Candidates).
+
+is_usersdb(IsShard, Normalized, Candidates) ->
+    lists:any(fun({Flag, Name}) ->
+        Flag == IsShard andalso Name == Normalized
+    end, Candidates).
 
 check_dbname(#server{dbname_regexp=RegExp}, DbName) ->
     case re:run(DbName, RegExp, [{capture, none}]) of
@@ -561,3 +567,25 @@ db_closed(Server, Options) ->
         false -> Server#server{dbs_open=Server#server.dbs_open - 1};
         true -> Server
     end.
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+is_usersdb_test_() ->
+    Candidates = [
+        {false, <<"per_node_users_db">>},
+        {true, <<"clustered_users_db">>},
+        {false, <<"_users">>}
+    ],
+    {"Tests for is_usersdb", [
+        ?_assert(is_usersdb(false, <<"_users">>, Candidates)),
+        ?_assertNot(is_usersdb(true, <<"_users">>, Candidates)),
+
+        ?_assert(is_usersdb(false, <<"per_node_users_db">>, Candidates)),
+        ?_assertNot(is_usersdb(true, <<"per_node_users_db">>, Candidates)),
+
+        ?_assert(is_usersdb(true, <<"clustered_users_db">>, Candidates)),
+        ?_assertNot(is_usersdb(false, <<"clustered_users_db">>, Candidates))
+    ]}.
+
+-endif.

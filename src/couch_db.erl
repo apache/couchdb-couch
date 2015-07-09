@@ -34,6 +34,7 @@
 -export([check_md5/2, with_stream/3]).
 -export([monitored_by/1]).
 -export([normalize_dbname/1]).
+-export([is_shard/1]).
 
 -include_lib("couch/include/couch_db.hrl").
 
@@ -1487,3 +1488,10 @@ normalize_dbname(DbName) ->
 strip_shard_timestamp(<<"shards/", _/binary>> = Path) ->
     [P|_] = binary:split(Path, <<".">>, [global]),
     P.
+
+is_shard(<<"shards/", _/binary>>) ->
+    true;
+is_shard([$s, $h, $a, $r, $d, $s, $/ | _]) ->
+    true;
+is_shard(_) ->
+    false.
