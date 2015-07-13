@@ -34,6 +34,7 @@
 -export([find_in_binary/2]).
 -export([callback_exists/3, validate_callback_exists/3]).
 -export([with_proc/4]).
+-export([bind_address/2]).
 
 -include_lib("couch/include/couch_db.hrl").
 
@@ -587,3 +588,33 @@ with_proc(M, F, A, Timeout) ->
         erlang:demonitor(Ref, [flush]),
         {error, timeout}
     end.
+
+%% Insist on binding to localhost until admin is created
+bind_address(Section, Default) ->
+    case couch_server:has_admins() of
+        true ->
+            Address = config:get(Section, "bind_address", Default),
+            ok = validate_bind_address(Address),
+            Address;
+        false ->
+            Loopback = loopback_address(),
+            couch_log:error("Forcing bind_address to ~p as no admin is configured!", [Loopback]),
+            Loopback
+    end.
+
+validate_bind_address(any) ->
+    ok;
+validate_bind_address(Address) ->
+    case inet_parse:address(Address) of
+        {ok, _} -> ok;
+        _ -> throw({error, invalid_bind_address})
+    end.
+
+loopback_address() ->
+    {ok, IFs} = inet:getifaddrs(),
+    [{_, Opts} | _] = lists:filter(fun is_loopback/1, IFs),
+    hd(lists:sort([A || {addr, A} <- Opts])).
+
+is_loopback({_Name, Opts}) ->
+    {flags, Flags} = lists:keyfind(flags, 1, Opts),
+    lists:member(loopback, Flags).
