@@ -633,12 +633,43 @@ load_validation_funs(#db{main_pid=Pid}=Db) ->
             Doc
     end,
     DDocs = lists:map(OpenDocs, DDocInfos),
-    Funs = lists:flatmap(fun(DDoc) ->
+    Funs0 = lists:flatmap(fun(DDoc) ->
         case couch_doc:get_validate_doc_fun(DDoc) of
             nil -> [];
             Fun -> [Fun]
         end
     end, DDocs),
+    ShardDB = ?l2b(config:get("mem3", "shard_db", "dbs")),
+    Funs = case Db#db.name of
+        ShardDB ->
+            ValidateShardDbUpdate = fun(_ShardDBDoc, nil, _JsonCtx, _SecObj) ->
+                ok;
+            (NewShardMapDoc0, OldShardMapDoc0, _JsonCtx, _SecObj) ->
+                OldShardMapDoc = couch_doc:with_ejson_body(OldShardMapDoc0),
+                NewShardMapDoc = couch_doc:with_ejson_body(NewShardMapDoc0),
+                #doc{body=OldShardMapBody, deleted=OldDeleted} = OldShardMapDoc,
+                #doc{body=NewShardMapBody, deleted=NewDeleted} = NewShardMapDoc,
+                if OldDeleted =:= NewDeleted ->
+                    HashAlgo = couch_util:get_value(
+                        <<"hash_algorithm">>, NewShardMapBody),
+                    OldHashAlgo = couch_util:get_value(
+                        <<"hash_algorithm">>, OldShardMapBody),
+                    if HashAlgo =/= OldHashAlgo ->
+                        throw({
+                            bad_request,
+                            <<"You can't change the hash algorithm.">>
+                        });
+                    true ->
+                        ok
+                    end;
+                true ->
+                    ok
+                end
+            end,
+            [ValidateShardDbUpdate|Funs0];
+        _ ->
+            Funs0
+    end,
     gen_server:cast(Pid, {load_validation_funs, Funs}),
     Funs.
 

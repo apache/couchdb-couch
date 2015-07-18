@@ -630,7 +630,23 @@ refresh_validate_doc_funs(Db0) ->
             Fun -> [Fun]
             end
         end, DesignDocs),
-    Db#db{validate_doc_funs=ProcessDocFuns}.
+
+    DbName = Db0#db.name,
+    couch_log:error("Refreshing validate doc funs", []),
+    ProcessDocFuns1 = case config:get("mem3", "shard_db", "dbs") of
+        DbName ->
+            [fun validate_shard_db_update/4|ProcessDocFuns];
+        _ ->
+            ProcessDocFuns
+    end,
+
+    Db#db{validate_doc_funs=ProcessDocFuns1}.
+
+validate_shard_db_update(Doc, DiskDoc, JsonCtx, SecObj) ->
+    couch_log:error("Doc: ~p", [Doc]),
+    couch_log:error("DiskDoc: ~p", [DiskDoc]),
+    ok.
+
 
 % rev tree functions
 
