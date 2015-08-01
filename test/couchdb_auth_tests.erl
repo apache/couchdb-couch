@@ -40,7 +40,7 @@ auth_test_() ->
         }
     }.
 
-should_not_return_username_on_post_to_session(Url) ->
+should_return_username_on_post_to_session(Url) ->
     ?_assertEqual(<<"rocko">>,
         begin
             ok = config:set("admins", "rocko", "artischocko", false),
