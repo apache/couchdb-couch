@@ -34,7 +34,7 @@ auth_test_() ->
                 foreach,
                 fun setup/0, fun teardown/1,
                 [
-                    fun should_not_return_username_on_post_to_session/1
+                    fun should_return_username_on_post_to_session/1
                 ]
             }
         }
