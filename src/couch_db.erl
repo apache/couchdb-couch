@@ -34,6 +34,7 @@
 -export([check_md5/2, with_stream/3]).
 -export([monitored_by/1]).
 -export([normalize_dbname/1]).
+-export([is_shard/1]).
 
 -include_lib("couch/include/couch_db.hrl").
 
@@ -1476,7 +1477,21 @@ select_gt(V1, _V2) -> V1.
 select_lt(V1, V2) when V1 > V2 -> V2;
 select_lt(V1, _V2) -> V1.
 
-normalize_dbname(<<"shards/", _/binary>> = Path) ->
+normalize_dbname(DbName) when is_list(DbName) ->
+    normalize_dbname(?l2b(DbName));
+normalize_dbname(<<"shards/", _/binary>> = Path0) ->
+    Path = strip_shard_timestamp(Path0),
     lists:last(binary:split(mem3:dbname(Path), <<"/">>, [global]));
 normalize_dbname(DbName) ->
     DbName.
+
+strip_shard_timestamp(<<"shards/", _/binary>> = Path) ->
+    [P|_] = binary:split(Path, <<".">>, [global]),
+    P.
+
+is_shard(<<"shards/", _/binary>>) ->
+    true;
+is_shard([$s, $h, $a, $r, $d, $s, $/ | _]) ->
+    true;
+is_shard(_) ->
+    false.
