@@ -41,7 +41,7 @@ try_compile(Proc, FunctionType, FunctionName, FunctionSource) ->
     catch {compilation_error, E} ->
         Fmt = "Compilation of the ~s function in the '~s' view failed: ~s",
         Msg = io_lib:format(Fmt, [FunctionType, FunctionName, E]),
-        throw({compilation_error, Msg})
+        throw({bad_request, compilation_error, Msg})
     end.
 
 start_doc_map(Lang, Functions, Lib) ->
