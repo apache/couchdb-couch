@@ -54,6 +54,8 @@ before_doc_update(Doc, #db{user_ctx = UserCtx} = Db) ->
 % If newDoc.password == null || newDoc.password == undefined:
 %   ->
 %   noop
+% Else If password is weak:
+%   throw forbidden
 % Else -> // calculate password hash server side
 %    newDoc.password_sha = hash_pw(newDoc.password + salt)
 %    newDoc.salt = salt

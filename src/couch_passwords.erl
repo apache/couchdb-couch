@@ -23,6 +23,7 @@
 %% legacy scheme, not used for new passwords.
 -spec simple(binary(), binary()) -> binary().
 simple(Password, Salt) when is_binary(Password), is_binary(Salt) ->
+    validate_password(Password),
     ?l2b(couch_util:to_hex(crypto:sha(<<Password/binary, Salt/binary>>))).
 
 %% CouchDB utility functions
@@ -78,6 +79,7 @@ pbkdf2(Password, Salt, Iterations, DerivedLength) when is_binary(Password),
                                                        is_integer(Iterations),
                                                        Iterations > 0,
                                                        is_integer(DerivedLength) ->
+    validate_password(Password),
     L = ceiling(DerivedLength / ?SHA1_OUTPUT_LENGTH),
     <<Bin:DerivedLength/binary,_/binary>> =
         iolist_to_binary(pbkdf2(Password, Salt, Iterations, L, 1, [])),
@@ -126,6 +128,16 @@ verify(X, Y) when is_list(X) and is_list(Y) ->
             false
     end;
 verify(_X, _Y) -> false.
+
+validate_password(Password) when is_binary(Password) ->
+    MinLength = config:get_integer("passwords", "min_length", 3),
+    case byte_size(Password) < MinLength of
+        true ->
+            throw({forbidden, "Password is too short"});
+        false ->
+            ok
+    end.
+
 
 -spec ceiling(number()) -> integer().
 ceiling(X) ->
