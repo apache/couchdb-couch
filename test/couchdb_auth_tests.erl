@@ -34,13 +34,13 @@ auth_test_() ->
                 foreach,
                 fun setup/0, fun teardown/1,
                 [
-                    fun should_not_return_username_on_post_to_session/1
+                    fun should_return_username_on_post_to_session/1
                 ]
             }
         }
     }.
 
-should_not_return_username_on_post_to_session(Url) ->
+should_return_username_on_post_to_session(Url) ->
     ?_assertEqual(<<"rocko">>,
         begin
             ok = config:set("admins", "rocko", "artischocko", false),
