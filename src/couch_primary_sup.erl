@@ -36,7 +36,13 @@ init([]) ->
             permanent,
             brutal_kill,
             worker,
-            [couch_server]}
+            [couch_server]},
+        {couch_auth_delay,
+            {couch_auth_delay, start_link, []},
+            permanent,
+            brutal_kill,
+            worker,
+            [couch_auth_delay]}
     ],
     {ok, {{one_for_one, 10, 3600}, Children}}.
 

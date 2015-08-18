@@ -88,6 +88,8 @@ default_authentication_handler(Req) ->
 default_authentication_handler(Req, AuthModule) ->
     case basic_name_pw(Req) of
     {User, Pass} ->
+        Peer = peer(Req),
+        maybe_delay(User, Peer),
         case AuthModule:get_user_creds(Req, User) of
             nil ->
                 throw({unauthorized, <<"Name or password is incorrect.">>});
@@ -97,6 +99,7 @@ default_authentication_handler(Req, AuthModule) ->
                 Password = ?l2b(Pass),
                 case authenticate(Password, UserProps) of
                     true ->
+                        couch_auth_delay:success(User, Peer),
                         UserProps2 = maybe_upgrade_password_hash(
                             Req, UserName, Password, UserProps,
                             AuthModule, AuthCtx),
@@ -105,6 +108,7 @@ default_authentication_handler(Req, AuthModule) ->
                             roles=couch_util:get_value(<<"roles">>, UserProps2, [])
                         }};
                     false ->
+                        couch_auth_delay:failure(User, Peer),
                         authentication_warning(Req, UserName),
                         throw({unauthorized, <<"Name or password is incorrect.">>})
                 end
@@ -298,7 +302,10 @@ handle_session_req(#httpd{method='POST', mochi_req=MochiReq}=Req, AuthModule) ->
         _ ->
             []
     end,
-    UserName = ?l2b(extract_username(Form)),
+    User = extract_username(Form),
+    Peer = peer(Req),
+    maybe_delay(User, Peer),
+    UserName = ?l2b(User),
     Password = ?l2b(couch_util:get_value("password", Form, "")),
     couch_log:debug("Attempt Login: ~s",[UserName]),
     {ok, UserProps, AuthCtx} = case AuthModule:get_user_creds(Req, UserName) of
@@ -307,6 +314,7 @@ handle_session_req(#httpd{method='POST', mochi_req=MochiReq}=Req, AuthModule) ->
     end,
     case authenticate(Password, UserProps) of
         true ->
+            couch_auth_delay:success(User, Peer),
             verify_totp(UserProps, Form),
             UserProps2 = maybe_upgrade_password_hash(
                 Req, UserName, Password, UserProps, AuthModule, AuthCtx),
@@ -329,6 +337,7 @@ handle_session_req(#httpd{method='POST', mochi_req=MochiReq}=Req, AuthModule) ->
                     {roles, couch_util:get_value(<<"roles">>, UserProps2, [])}
                 ]});
         false ->
+            couch_auth_delay:failure(User, Peer),
             authentication_warning(Req, UserName),
             % clear the session
             Cookie = mochiweb_cookies:cookie("AuthSession", "", [{path, "/"}] ++ cookie_scheme(Req)),
@@ -521,3 +530,14 @@ authentication_warning(#httpd{mochi_req = Req}, User) ->
     Peer = Req:get(peer),
     couch_log:warning("~p: Authentication failed for user ~s from ~s",
         [?MODULE, User, Peer]).
+
+peer(#httpd{mochi_req = MochiReq}) ->
+    MochiReq:get(peer).
+
+maybe_delay(User, Peer) ->
+    case couch_auth_delay:get_delay_secs(User, Peer) of
+        0 ->
+            ok;
+        Delay ->
+            timer:sleep(Delay * 1000)
+    end.
