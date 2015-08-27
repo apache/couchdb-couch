@@ -12,11 +12,30 @@
 
 -module(couch_httpd_handlers).
 
--export([url_handler/1, db_handler/1, design_handler/1]).
+-export([url_handler/1, db_handler/1, design_handler/1, endpoints/1]).
 
 url_handler(<<"_oauth">>)          -> fun couch_httpd_oauth:handle_oauth_req/1;
+
 url_handler(_) -> no_match.
 
 db_handler(_) -> no_match.
 
 design_handler(_) -> no_match.
+
+endpoints(url_handler) ->
+    [
+        <<"_oauth">>
+    ];
+endpoints(db_handler) ->
+    [];
+endpoints(design_handler) ->
+    [].
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+couch_endpoints_test_() ->
+    Apps = [couch_epi, couch],
+    chttpd_httpd_handlers_test_util:endpoints_test(couch, ?MODULE, Apps).
+
+-endif.
