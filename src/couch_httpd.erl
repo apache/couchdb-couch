@@ -639,12 +639,17 @@ log_request(#httpd{mochi_req=MochiReq,peer=Peer}=Req, Code) ->
         true ->
             ok;
         _ ->
-            couch_log:notice("~s - - ~s ~s ~B", [
+            Method = MochiReq:get(method),
+            Msg = [
                 Peer,
-                MochiReq:get(method),
+                " - - ",
+                atom_to_list(Method),
+                " ",
                 MochiReq:get(raw_path),
-                Code
-            ]),
+                " ",
+                integer_to_list(Code)
+            ],
+            couch_log:notice(lists:flatten(Msg)),
             gen_event:notify(couch_plugin, {log_request, Req, Code})
     end.
 
