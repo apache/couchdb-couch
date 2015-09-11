@@ -136,7 +136,7 @@ handle_uuids_req(#httpd{method='GET'}=Req) ->
     Etag = couch_httpd:make_etag(UUIDs),
     couch_httpd:etag_respond(Req, Etag, fun() ->
         CacheBustingHeaders = [
-            {"Date", couch_util:rfc1123_date()},
+            {"Date", couch_util_clock:rfc1123()},
             {"Cache-Control", "no-cache"},
             % Past date, ON PURPOSE!
             {"Expires", "Mon, 01 Jan 1990 00:00:00 GMT"},
