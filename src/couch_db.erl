@@ -1514,13 +1514,20 @@ validate_dbname(DbName) when is_binary(DbName) ->
 validate_dbname_int(DbName, Normalized) when is_binary(DbName) ->
     case re:run(DbName, ?DBNAME_REGEX, [{capture,none}, dollar_endonly]) of
         match ->
-            ok;
+            case validate_part_lengths(DbName) of
+                true -> ok;
+                false -> {error, {database_name_too_long, DbName}}
+            end;
         nomatch ->
             case is_systemdb(Normalized) of
                 true -> ok;
                 false -> {error, {illegal_database_name, DbName}}
             end
     end.
+
+validate_part_lengths(DbName) ->
+    Parts = filename:split(DbName),
+    [Part || Part <- Parts, byte_size(Part) > 128] == [].
 
 is_systemdb(DbName) when is_list(DbName) ->
     is_systemdb(?l2b(DbName));
