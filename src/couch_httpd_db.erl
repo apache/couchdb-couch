@@ -364,6 +364,61 @@ db_req(#httpd{method='POST',path_parts=[_,<<"_bulk_docs">>]}=Req, Db) ->
 db_req(#httpd{path_parts=[_,<<"_bulk_docs">>]}=Req, _Db) ->
     send_method_not_allowed(Req, "POST");
 
+
+% Allow all options of a regular 'GET' request in a batch.
+db_req(#httpd{method='POST',path_parts=[_,<<"_bulk_get">>]}=Req, Db) ->
+    couch_stats_collector:increment({httpd, bulk_get}),
+    couch_httpd:validate_ctype(Req, "application/json"),
+    {JsonProps} = couch_httpd:json_body_obj(Req),
+    case couch_util:get_value(<<"docs">>, JsonProps) of
+    undefined ->
+        send_error(Req, 400, <<"bad_request">>, <<"Missing JSON list of 'docs'">>);
+    DocsArray ->
+            % expect an array of [{id:x, other get parameters}]
+            % for PouchDB, absolutely must support only
+            % {id: id, open_revs: missingBatch, revs: true, attachments: true}
+            % for proposed spec need to support all GET parameters
+            {ok, Resp} = start_json_response(Req, 200),
+            send_chunk(Resp, "["),
+            lists:foldl(fun(JsonObj, Separator) -> 
+                     {Props} = JsonObj,
+                     DocId = couch_util:get_value(<<"id">>, Props),
+                     couch_doc:validate_docid(DocId),
+                     #doc_query_args{
+                        rev = Rev,
+                        open_revs = Revs,
+                        options = Options1,
+                        atts_since = AttsSince
+                       } = parse_doc_args(Props),
+                    send_chunk(Resp, Separator),
+                    % todo handle case where we don't have all options
+                    {ok, Results} = couch_db:open_doc_revs(Db, DocId, Revs, Options1),
+                    send_chunk(Resp, "["),
+                    lists:foldl(
+                      fun(Result, AccSeparator) ->
+                          case Result of
+                          {ok, Doc} ->
+                              JsonDoc = couch_doc:to_json_obj(Doc, Options1),
+                              Json = ?JSON_ENCODE({[{ok, JsonDoc}]}),
+                              send_chunk(Resp, AccSeparator ++ Json);
+                          {{not_found, missing}, RevId} ->
+                              RevStr = couch_doc:rev_to_str(RevId),
+                              Json = ?JSON_ENCODE({[{"missing", RevStr}]}),
+                              send_chunk(Resp, AccSeparator ++ Json)
+                          end,
+                          "," % AccSeparator now has a comma
+                      end,
+                      "", Results),
+                      send_chunk(Resp, "]"),
+                    "," % Separator now has a comma
+                 end, "", DocsArray),
+            send_chunk(Resp, "]"),
+            end_json_response(Resp)
+    end;
+db_req(#httpd{path_parts=[_,<<"_bulk_get">>]}=Req, _Db) ->
+    send_method_not_allowed(Req, "POST");
+
+
 db_req(#httpd{method='POST',path_parts=[_,<<"_purge">>]}=Req, Db) ->
     couch_httpd:validate_ctype(Req, "application/json"),
     {IdsRevs} = couch_httpd:json_body_obj(Req),
@@ -1082,54 +1137,83 @@ get_md5_header(Req) ->
             <<>>
     end.
 
-parse_doc_query(Req) ->
+% parse doc query (true json)
+parse_doc_args(DocArgs) ->
     lists:foldl(fun({Key,Value}, Args) ->
         case {Key, Value} of
-        {"attachments", "true"} ->
+        {<<"attachments">>, true} ->
             Options = [attachments | Args#doc_query_args.options],
             Args#doc_query_args{options=Options};
-        {"meta", "true"} ->
-            Options = [revs_info, conflicts, deleted_conflicts | Args#doc_query_args.options],
-            Args#doc_query_args{options=Options};
-        {"revs", "true"} ->
+        {<<"revs">>, true} ->
             Options = [revs | Args#doc_query_args.options],
             Args#doc_query_args{options=Options};
-        {"local_seq", "true"} ->
-            Options = [local_seq | Args#doc_query_args.options],
-            Args#doc_query_args{options=Options};
-        {"revs_info", "true"} ->
-            Options = [revs_info | Args#doc_query_args.options],
-            Args#doc_query_args{options=Options};
-        {"conflicts", "true"} ->
-            Options = [conflicts | Args#doc_query_args.options],
-            Args#doc_query_args{options=Options};
-        {"deleted_conflicts", "true"} ->
-            Options = [deleted_conflicts | Args#doc_query_args.options],
-            Args#doc_query_args{options=Options};
-        {"rev", Rev} ->
+        {<<"rev">>, Rev} ->
             Args#doc_query_args{rev=couch_doc:parse_rev(Rev)};
-        {"open_revs", "all"} ->
+        {<<"open_revs">>, "all"} ->
             Args#doc_query_args{open_revs=all};
-        {"open_revs", RevsJsonStr} ->
-            JsonArray = ?JSON_DECODE(RevsJsonStr),
+        {<<"open_revs">>, JsonArray} ->
             Args#doc_query_args{open_revs=couch_doc:parse_revs(JsonArray)};
-        {"latest", "true"} ->
-            Options = [latest | Args#doc_query_args.options],
-            Args#doc_query_args{options=Options};
-        {"atts_since", RevsJsonStr} ->
-            JsonArray = ?JSON_DECODE(RevsJsonStr),
+        {<<"atts_since">>, JsonArray} ->
             Args#doc_query_args{atts_since = couch_doc:parse_revs(JsonArray)};
-        {"new_edits", "false"} ->
-            Args#doc_query_args{update_type=replicated_changes};
-        {"new_edits", "true"} ->
-            Args#doc_query_args{update_type=interactive_edit};
-        {"att_encoding_info", "true"} ->
-            Options = [att_encoding_info | Args#doc_query_args.options],
-            Args#doc_query_args{options=Options};
-        _Else -> % unknown key value pair, ignore.
-            Args
+        {Key, false} ->
+            parse_doc_query_single({binary_to_list(Key), "false"}, Args);
+        {Key, true} ->
+            parse_doc_query_single({binary_to_list(Key), "true"}, Args);
+        _Else -> % unknown key value pair, ignore
+            parse_doc_query_single({binary_to_list(Key), Value}, Args)
         end
-    end, #doc_query_args{}, couch_httpd:qs(Req)).
+    end, #doc_query_args{}, DocArgs).
+
+parse_doc_query(Req) ->
+    lists:foldl(parse_doc_query_single,
+        #doc_query_args{}, couch_httpd:qs(Req)).
+
+parse_doc_query_single({Key,Value}, Args) ->
+    case {Key, Value} of
+    {"attachments", "true"} ->
+        Options = [attachments | Args#doc_query_args.options],
+        Args#doc_query_args{options=Options};
+    {"meta", "true"} ->
+        Options = [revs_info, conflicts, deleted_conflicts | Args#doc_query_args.options],
+        Args#doc_query_args{options=Options};
+    {"revs", "true"} ->
+        Options = [revs | Args#doc_query_args.options],
+        Args#doc_query_args{options=Options};
+    {"local_seq", "true"} ->
+        Options = [local_seq | Args#doc_query_args.options],
+        Args#doc_query_args{options=Options};
+    {"revs_info", "true"} ->
+        Options = [revs_info | Args#doc_query_args.options],
+        Args#doc_query_args{options=Options};
+    {"conflicts", "true"} ->
+        Options = [conflicts | Args#doc_query_args.options],
+        Args#doc_query_args{options=Options};
+    {"deleted_conflicts", "true"} ->
+        Options = [deleted_conflicts | Args#doc_query_args.options],
+        Args#doc_query_args{options=Options};
+    {"rev", Rev} ->
+        Args#doc_query_args{rev=couch_doc:parse_rev(Rev)};
+    {"open_revs", "all"} ->
+        Args#doc_query_args{open_revs=all};
+    {"open_revs", RevsJsonStr} ->
+        JsonArray = ?JSON_DECODE(RevsJsonStr),
+        Args#doc_query_args{open_revs=couch_doc:parse_revs(JsonArray)};
+    {"latest", "true"} ->
+        Options = [latest | Args#doc_query_args.options],
+        Args#doc_query_args{options=Options};
+    {"atts_since", RevsJsonStr} ->
+        JsonArray = ?JSON_DECODE(RevsJsonStr),
+        Args#doc_query_args{atts_since = couch_doc:parse_revs(JsonArray)};
+    {"new_edits", "false"} ->
+        Args#doc_query_args{update_type=replicated_changes};
+    {"new_edits", "true"} ->
+        Args#doc_query_args{update_type=interactive_edit};
+    {"att_encoding_info", "true"} ->
+        Options = [att_encoding_info | Args#doc_query_args.options],
+        Args#doc_query_args{options=Options};
+    _Else -> % unknown key value pair, ignore.
+        Args
+    end.
 
 parse_changes_query(Req, Db) ->
     ChangesArgs = lists:foldl(fun({Key, Value}, Args) ->
