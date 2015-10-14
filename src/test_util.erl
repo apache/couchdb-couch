@@ -33,6 +33,7 @@
 -export([start/1, start/2, start/3, stop/1]).
 
 -record(test_context, {mocked = [], started = [], module}).
+-record(log_context, {lager_redirect = true, sasl_logger = tty}).
 
 srcdir() ->
     code:priv_dir(couch) ++ "/../../".
@@ -85,7 +86,10 @@ stop_couch(_) ->
     stop_couch().
 
 start_applications(Apps) ->
-    start_applications(Apps, []).
+    LogContext = disable_logs(),
+    StartRes = start_applications(Apps, []),
+    enable_logs(LogContext),
+    StartRes.
 
 start_applications([], Acc) ->
     lists:reverse(Acc);
@@ -102,7 +106,9 @@ start_applications([App|Apps], Acc) ->
     end.
 
 stop_applications(Apps) ->
+    LogContext = disable_logs(),
     [application:stop(App) || App <- lists:reverse(Apps)],
+    enable_logs(LogContext),
     ok.
 
 start_config(Chain) ->
@@ -260,3 +266,20 @@ load_applications_with_stats() ->
 stats_file_to_app(File) ->
     [_Desc, _Priv, App|_] = lists:reverse(filename:split(File)),
     erlang:list_to_atom(App).
+
+disable_logs() ->
+    error_logger:tty(false),
+    LagerRedirect = application:get_env(lager, error_logger_redirect),
+    application:load(lager),
+    application:set_env(lager, error_logger_redirect, false),
+    SaslLogger = application:get_env(sasl_error_logger),
+    application:load(sasl),
+    application:set_env(sasl, sasl_error_logger, false),
+    #log_context{lager_redirect = LagerRedirect, sasl_logger = SaslLogger}.
+
+enable_logs(#log_context{lager_redirect = LagerRedirect, sasl_logger= SaslLogger}) ->
+    application:load(sasl),
+    application:set_env(sasl, sasl_error_logger, SaslLogger),
+    application:load(lager),
+    application:set_env(lager, error_logger_redirect, LagerRedirect),
+    error_logger:tty(true).
