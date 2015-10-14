@@ -438,17 +438,28 @@ digest_from_json(Props) ->
 
 
 to_json(Att, OutputData, DataToFollow, ShowEncoding) ->
-    [Name, Data, DiskLen, AttLen, Enc, Type, RevPos, Md5] = fetch(
+    [AttExternal,AttExternalSize, AttExternalMD5] = couch_att:fetch([att_external,att_external_size,att_external_md5],Att),
+    [Name, Data, DiskLenTmp, AttLen, Enc, Type, RevPos, Md5] = fetch(
         [name, data, disk_len, att_len, encoding, type, revpos, md5], Att
     ),
+    case AttExternal of
+        "external" ->
+            DiskLen = AttExternalSize,
+            DigestProp = case AttExternalMD5 of
+                <<>> -> [];
+                Digest -> [{<<"digest">>, <<"md5-", Digest/binary>>}]
+            end;
+        _ ->
+            DiskLen = DiskLenTmp,
+            DigestProp = case base64:encode(Md5) of
+                <<>> -> [];
+                Digest -> [{<<"digest">>, <<"md5-", Digest/binary>>}]
+            end
+    end,
     Props = [
         {<<"content_type">>, Type},
         {<<"revpos">>, RevPos}
     ],
-    DigestProp = case base64:encode(Md5) of
-        <<>> -> [];
-        Digest -> [{<<"digest">>, <<"md5-", Digest/binary>>}]
-    end,
     DataProps = if
         not OutputData orelse Data == stub ->
             [{<<"length">>, DiskLen}, {<<"stub">>, true}];
