@@ -292,8 +292,8 @@ sig_method_1(_) ->
     undefined.
 
 
-ok(#httpd{mochi_req=MochiReq}, Body) ->
-    {ok, MochiReq:respond({200, [], Body})}.
+ok(Req, Body) ->
+    couch_httpd:send_response(Req, 200, [], {io_list, Body}).
 
 
 oauth_credentials_info(Token, ConsumerKey) ->
