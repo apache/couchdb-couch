@@ -34,6 +34,8 @@
 
 -export([start/1, start/2, start/3, stop/1]).
 
+-export([fake_db/1]).
+
 -record(test_context, {mocked = [], started = [], module}).
 
 -define(DEFAULT_APPS,
