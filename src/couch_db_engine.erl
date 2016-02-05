@@ -563,9 +563,6 @@
         {ok, CompactedDbHandle::db_handle(), CompactorPid::pid() | undefined}.
 
 
--include("couch_db_int.hrl").
-
-
 -export([
     exists/2,
     delete/4,
