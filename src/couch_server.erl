@@ -25,7 +25,7 @@
 % config_listener api
 -export([handle_config_change/5, handle_config_terminate/3]).
 
--export([delete_file/3]).
+-export([delete_file/2, delete_file/3]).
 
 -include_lib("couch/include/couch_db.hrl").
 
@@ -455,7 +455,7 @@ handle_call({delete, DbName, Options}, _From, Server) ->
         %% subsequent request for this DB will try to open them to use
         %% as a recovery.
         lists:foreach(fun(Ext) ->
-            couch_file:delete(Server#server.root_dir, FullFilepath ++ Ext)
+            delete_file(Server#server.root_dir, FullFilepath ++ Ext)
         end, [".compact", ".compact.data", ".compact.meta"]),
         couch_file:delete(Server#server.root_dir, FullFilepath ++ ".compact"),
 
@@ -539,30 +539,10 @@ db_closed(Server, Options) ->
         true -> Server
     end.
 
+delete_file(RootDir, FullFilePath) ->
+    delete_file(RootDir, FullFilePath, []).
+
 delete_file(RootDir, FullFilePath, Options) ->
     Async = not lists:member(sync, Options),
     RenameOnDelete = config:get_boolean("couchdb", "rename_on_delete", false),
-    case {Async, RenameOnDelete} of
-        {_, true} ->
-            rename_on_delete(FullFilePath);
-        {Async, false} ->
-            case couch_file:delete(RootDir, FullFilePath, Async) of
-                ok -> {ok, deleted};
-                Else -> Else
-            end
-    end.
-
-rename_on_delete(Original) ->
-    DeletedFileName = deleted_filename(Original),
-    case file:rename(Original, DeletedFileName) of
-        ok -> {ok, {renamed, DeletedFileName}};
-        Else -> Else
-    end.
-
-deleted_filename(Original) ->
-    {{Y,Mon,D}, {H,Min,S}} = calendar:universal_time(),
-    Suffix = lists:flatten(
-        io_lib:format(".~w~2.10.0B~2.10.0B."
-            ++ "~2.10.0B~2.10.0B~2.10.0B.deleted"
-            ++ filename:extension(Original), [Y,Mon,D,H,Min,S])),
-    filename:rootname(Original) ++ Suffix.
+    couch_file:delete(RootDir, FullFilePath, Async, RenameOnDelete).

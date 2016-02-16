@@ -43,9 +43,9 @@ init({DbName, Filepath, Fd, Options}) ->
         ok = couch_file:write_header(Fd, Header),
         % delete any old compaction files that might be hanging around
         RootDir = config:get("couchdb", "database_dir", "."),
-        couch_file:delete(RootDir, Filepath ++ ".compact"),
-        couch_file:delete(RootDir, Filepath ++ ".compact.data"),
-        couch_file:delete(RootDir, Filepath ++ ".compact.meta");
+        couch_server:delete_file(RootDir, Filepath ++ ".compact"),
+        couch_server:delete_file(RootDir, Filepath ++ ".compact.data"),
+        couch_server:delete_file(RootDir, Filepath ++ ".compact.meta");
     false ->
         case couch_file:read_header(Fd) of
         {ok, Header} ->
@@ -105,7 +105,7 @@ handle_call(cancel_compact, _From, #db{compactor_pid = Pid} = Db) ->
     unlink(Pid),
     exit(Pid, kill),
     RootDir = config:get("couchdb", "database_dir", "."),
-    ok = couch_file:delete(RootDir, Db#db.filepath ++ ".compact"),
+    {ok, _} = couch_server:delete_file(RootDir, Db#db.filepath ++ ".compact"),
     Db2 = Db#db{compactor_pid = nil},
     ok = gen_server:call(couch_server, {db_updated, Db2}, infinity),
     {reply, ok, Db2};
@@ -246,11 +246,11 @@ handle_cast({compact_done, CompactFilepath}, #db{filepath=Filepath}=Db) ->
                         [Filepath, CompactFilepath]),
         ok = file:rename(CompactFilepath, Filepath ++ ".compact"),
         RootDir = config:get("couchdb", "database_dir", "."),
-        couch_file:delete(RootDir, Filepath),
+        couch_server:delete_file(RootDir, Filepath),
         ok = file:rename(Filepath ++ ".compact", Filepath),
         % Delete the old meta compaction file after promoting
         % the compaction file.
-        couch_file:delete(RootDir, Filepath ++ ".compact.meta"),
+        couch_server:delete_file(RootDir, Filepath ++ ".compact.meta"),
         close_db(Db),
         NewDb3 = refresh_validate_doc_funs(NewDb2),
         ok = gen_server:call(couch_server, {db_updated, NewDb3}, infinity),

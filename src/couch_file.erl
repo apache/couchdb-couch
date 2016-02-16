@@ -36,7 +36,7 @@
 -export([append_raw_chunk/2, assemble_file_chunk/1, assemble_file_chunk/2]).
 -export([append_term/2, append_term/3, append_term_md5/2, append_term_md5/3]).
 -export([write_header/2, read_header/1]).
--export([delete/2, delete/3, nuke_dir/2, init_delete_dir/1]).
+-export([delete/4, deleted_filename/1, nuke_dir/2, init_delete_dir/1]).
 
 % gen_server callbacks
 -export([init/1, terminate/2, code_change/3]).
@@ -218,24 +218,42 @@ close(Fd) ->
     gen_server:call(Fd, close, infinity).
 
 
-delete(RootDir, Filepath) ->
-    delete(RootDir, Filepath, true).
-
-
-delete(RootDir, Filepath, Async) ->
+delete(RootDir, Filepath, _Async, true) ->
+    rename_on_delete(Filepath);
+delete(RootDir, Filepath, Async, false) ->
     DelFile = filename:join([RootDir,".delete", ?b2l(couch_uuids:random())]),
     case file:rename(Filepath, DelFile) of
     ok ->
         if (Async) ->
-            spawn(file, delete, [DelFile]),
-            ok;
+            spawn(fun() -> delete_file(DelFile) end),
+            {ok, deleted};
         true ->
-            file:delete(DelFile)
+            delete_file(DelFile)
         end;
     Error ->
         Error
     end.
 
+delete_file(FilePath) ->
+    case file:delete(FilePath) of
+        ok -> {ok, deleted};
+        Else -> Else
+    end.
+
+rename_on_delete(Original) ->
+    DeletedFileName = deleted_filename(Original),
+    case file:rename(Original, DeletedFileName) of
+        ok -> {ok, {renamed, DeletedFileName}};
+        Else -> Else
+    end.
+
+deleted_filename(Original) ->
+    {{Y,Mon,D}, {H,Min,S}} = calendar:universal_time(),
+    Suffix = lists:flatten(
+        io_lib:format(".~w~2.10.0B~2.10.0B."
+            ++ "~2.10.0B~2.10.0B~2.10.0B.deleted"
+            ++ filename:extension(Original), [Y,Mon,D,H,Min,S])),
+    filename:rootname(Original) ++ Suffix.
 
 nuke_dir(RootDelDir, Dir) ->
     FoldFun = fun(File) ->
@@ -245,7 +263,7 @@ nuke_dir(RootDelDir, Dir) ->
                 ok = nuke_dir(RootDelDir, Path),
                 file:del_dir(Path);
             false ->
-                delete(RootDelDir, Path, false)
+                delete(RootDelDir, Path, false, false)
         end
     end,
     case file:list_dir(Dir) of
