@@ -457,7 +457,6 @@ handle_call({delete, DbName, Options}, _From, Server) ->
         lists:foreach(fun(Ext) ->
             delete_file(Server#server.root_dir, FullFilepath ++ Ext)
         end, [".compact", ".compact.data", ".compact.meta"]),
-        couch_file:delete(Server#server.root_dir, FullFilepath ++ ".compact"),
 
         couch_db_plugin:on_delete(DbName, Options),
 
