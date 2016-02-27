@@ -171,15 +171,8 @@ handle_preflight_request(Origin, Host, MochiReq) ->
         end
     end.
 
-
-send_preflight_response(#httpd{mochi_req=MochiReq}=Req, Headers) ->
-    couch_httpd:log_request(Req, 204),
-    couch_stats:increment_counter([couchdb, httpd_status_codes, 204]),
-    Headers1 = couch_httpd:http_1_0_keep_alive(MochiReq, Headers),
-    Headers2 = Headers1 ++ couch_httpd:server_header() ++
-               couch_httpd_auth:cookie_auth_header(Req, Headers1),
-    {ok, MochiReq:respond({204, Headers2, <<>>})}.
-
+send_preflight_response(Req, Headers) ->
+    couch_httpd:send_response(Req, 204, Headers, {io_list, <<>>}).
 
 % cors_headers/1
 

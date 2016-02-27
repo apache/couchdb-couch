@@ -720,21 +720,32 @@ last_chunk(Resp) ->
     Resp:write_chunk([]),
     {ok, Resp}.
 
-send_response(#httpd{mochi_req=MochiReq}=Req, Code, Headers, Body) ->
+send_response(#httpd{mochi_req=MochiReq0}=Req0, Code0, Headers0, {Type, Value0}) ->
+    {ok, {#httpd{mochi_req=MochiReq}=Req, Code, Headers, Value}} =
+        chttpd_plugin:before_response(Req0, Code0, Headers0, Value0),
+
     log_request(Req, Code),
     couch_stats:increment_counter([couchdb, httpd_status_codes, Code]),
-    Headers1 = http_1_0_keep_alive(MochiReq, Headers),
+
+    Body = make_body({Type, Value}),
+
     if Code >= 500 ->
         couch_log:error("httpd ~p error response:~n ~s", [Code, Body]);
     Code >= 400 ->
         couch_log:debug("httpd ~p error response:~n ~s", [Code, Body]);
     true -> ok
     end,
-    Headers2 = Headers1 ++ server_header() ++
-               couch_httpd_auth:cookie_auth_header(Req, Headers1),
-    Headers3 = couch_httpd_cors:cors_headers(Req, Headers2),
 
-    {ok, MochiReq:respond({Code, Headers3, Body})}.
+    {ok, MochiReq:respond({Code, Headers, Body})};
+send_response(Req, Code, Headers, Value) ->
+    AllHeaders = add_headers(Req, Headers),
+    send_response(Req, Code, AllHeaders, {io_list, Value}).
+
+make_body({json, JsonObj}) ->
+    [start_jsonp(), ?JSON_ENCODE(JsonObj), end_jsonp(), $\n];
+make_body({io_list, Body}) ->
+    Body.
+
 
 send_method_not_allowed(Req, Methods) ->
     send_error(Req, 405, [{"Allow", Methods}], <<"method_not_allowed">>, ?l2b("Only " ++ Methods ++ " allowed")).
@@ -747,9 +758,16 @@ send_json(Req, Code, Value) ->
 
 send_json(Req, Code, Headers, Value) ->
     initialize_jsonp(Req),
-    AllHeaders = maybe_add_default_headers(Req, Headers),
-    Body = [start_jsonp(), ?JSON_ENCODE(Value), end_jsonp(), $\n],
-    send_response(Req, Code, AllHeaders, Body).
+    AllHeaders = add_headers(Req, maybe_add_default_headers(Req, Headers)),
+    send_response(Req, Code, AllHeaders, {json, Value}).
+
+add_headers(#httpd{mochi_req=MochiReq}=Req, Headers) ->
+    Headers1 = http_1_0_keep_alive(MochiReq, Headers),
+
+    Headers2 = Headers1 ++ server_header() ++
+               couch_httpd_auth:cookie_auth_header(Req, Headers1),
+
+    couch_httpd_cors:cors_headers(Req, Headers2).
 
 start_json_response(Req, Code) ->
     start_json_response(Req, Code, []).
