@@ -224,7 +224,7 @@ delete(RootDir, Filepath, Options) ->
     DelFile = deleted_filename(RootDir, Filepath, Rename),
     case file:rename(Filepath, DelFile) of
         ok when Rename ->
-            {ok, {renamed, DelFile}};
+            update_mtime(DelFile);
         ok when Async ->
             spawn(fun() -> delete_file(DelFile) end),
             {ok, deleted};
@@ -232,6 +232,13 @@ delete(RootDir, Filepath, Options) ->
             delete_file(DelFile);
         Error ->
             Error
+    end.
+
+update_mtime(FilePath) ->
+    Now = calendar:local_time(),
+    case file:change_time(FilePath, Now) of
+        ok -> {ok, {renamed, FilePath}};
+        Else -> Else
     end.
 
 delete_file(FilePath) ->
