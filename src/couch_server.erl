@@ -542,6 +542,9 @@ delete_file(RootDir, FullFilePath) ->
     delete_file(RootDir, FullFilePath, []).
 
 delete_file(RootDir, FullFilePath, Options) ->
-    Async = not lists:member(sync, Options),
-    RenameOnDelete = config:get_boolean("couchdb", "rename_on_delete", false),
-    couch_file:delete(RootDir, FullFilePath, Async, RenameOnDelete).
+    case config:get_boolean("couchdb", "rename_on_delete", false) of
+        true ->
+            couch_file:delete(RootDir, FullFilePath, [rename | Options]);
+        false ->
+            couch_file:delete(RootDir, FullFilePath, Options)
+    end.

@@ -36,7 +36,7 @@
 -export([append_raw_chunk/2, assemble_file_chunk/1, assemble_file_chunk/2]).
 -export([append_term/2, append_term/3, append_term_md5/2, append_term_md5/3]).
 -export([write_header/2, read_header/1]).
--export([delete/4, deleted_filename/1, nuke_dir/2, init_delete_dir/1]).
+-export([delete/3, nuke_dir/2, init_delete_dir/1]).
 
 % gen_server callbacks
 -export([init/1, terminate/2, code_change/3]).
@@ -121,7 +121,7 @@ append_term_md5(Fd, Term, Options) ->
 
 append_binary(Fd, Bin) ->
     ioq:call(Fd, {append_bin, assemble_file_chunk(Bin)}, erlang:get(io_priority)).
-    
+
 append_binary_md5(Fd, Bin) ->
     ioq:call(Fd,
         {append_bin, assemble_file_chunk(Bin, couch_crypto:hash(md5, Bin))},
@@ -218,20 +218,20 @@ close(Fd) ->
     gen_server:call(Fd, close, infinity).
 
 
-delete(RootDir, Filepath, _Async, true) ->
-    rename_on_delete(Filepath);
-delete(RootDir, Filepath, Async, false) ->
-    DelFile = filename:join([RootDir,".delete", ?b2l(couch_uuids:random())]),
+delete(RootDir, Filepath, Options) ->
+    Async = not lists:member(sync, Options),
+    Rename = lists:member(rename, Options),
+    DelFile = deleted_filename(RootDir, Filepath, Rename),
     case file:rename(Filepath, DelFile) of
-    ok ->
-        if (Async) ->
+        ok when Rename ->
+            {ok, {renamed, DelFile}};
+        ok when Async ->
             spawn(fun() -> delete_file(DelFile) end),
             {ok, deleted};
-        true ->
-            delete_file(DelFile)
-        end;
-    Error ->
-        Error
+        ok ->
+            delete_file(DelFile);
+        Error ->
+            Error
     end.
 
 delete_file(FilePath) ->
@@ -240,14 +240,10 @@ delete_file(FilePath) ->
         Else -> Else
     end.
 
-rename_on_delete(Original) ->
-    DeletedFileName = deleted_filename(Original),
-    case file:rename(Original, DeletedFileName) of
-        ok -> {ok, {renamed, DeletedFileName}};
-        Else -> Else
-    end.
 
-deleted_filename(Original) ->
+deleted_filename(RootDir, _Original, false) ->
+    filename:join([RootDir,".delete", ?b2l(couch_uuids:random())]);
+deleted_filename(_RootDir, Original, true) ->
     {{Y,Mon,D}, {H,Min,S}} = calendar:universal_time(),
     Suffix = lists:flatten(
         io_lib:format(".~w~2.10.0B~2.10.0B."
@@ -263,7 +259,7 @@ nuke_dir(RootDelDir, Dir) ->
                 ok = nuke_dir(RootDelDir, Path),
                 file:del_dir(Path);
             false ->
-                delete(RootDelDir, Path, false, false)
+                delete(RootDelDir, Path, [sync])
         end
     end,
     case file:list_dir(Dir) of
