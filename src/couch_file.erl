@@ -247,16 +247,27 @@ delete_file(FilePath) ->
         Else -> Else
     end.
 
-
-deleted_filename(RootDir, _Original, false) ->
-    filename:join([RootDir,".delete", ?b2l(couch_uuids:random())]);
+deleted_filename(RootDir, Original, false) ->
+    Tokens = lists:filter(fun(Token) ->
+        not lists:member(Token, ["shards", ".shards", "mrview"])
+    end, string:tokens(Original -- RootDir, "/")),
+    DelFile = filename:join([RootDir,".delete", string:join(Tokens, ":")]),
+    Ending = io_lib:format("~6s", [couch_uuids:random()]),
+    deleted_filename(DelFile, Ending);
 deleted_filename(_RootDir, Original, true) ->
-    {{Y,Mon,D}, {H,Min,S}} = calendar:universal_time(),
-    Suffix = lists:flatten(
-        io_lib:format(".~w~2.10.0B~2.10.0B."
-            ++ "~2.10.0B~2.10.0B~2.10.0B.deleted"
-            ++ filename:extension(Original), [Y,Mon,D,H,Min,S])),
-    filename:rootname(Original) ++ Suffix.
+    deleted_filename(Original, "deleted").
+
+deleted_filename(Original, Ending) ->
+    RootName = filename:rootname(Original),
+    Suffix = deleted_filename_suffix(),
+    Extention = filename:extension(Original),
+    io_lib:format("~s.~s.~s~s", [RootName, Suffix, Ending, Extention]).
+
+deleted_filename_suffix() ->
+    {{Y, Mon, D}, {H, Min, S}} = calendar:universal_time(),
+    io_lib:format("~w~2.10.0B~2.10.0B"
+        ".~2.10.0B~2.10.0B~2.10.0B",
+        [Y, Mon, D, H, Min, S]).
 
 nuke_dir(RootDelDir, Dir) ->
     FoldFun = fun(File) ->
