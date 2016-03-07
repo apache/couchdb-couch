@@ -25,7 +25,7 @@
 % config_listener api
 -export([handle_config_change/5, handle_config_terminate/3]).
 
--export([delete_file/2, delete_file/3]).
+-export([delete_file/2, delete_file/3, delete_dir/2]).
 
 -include_lib("couch/include/couch_db.hrl").
 
@@ -547,4 +547,12 @@ delete_file(RootDir, FullFilePath, Options) ->
             couch_file:delete(RootDir, FullFilePath, [rename | Options]);
         false ->
             couch_file:delete(RootDir, FullFilePath, Options)
+    end.
+
+delete_dir(RootDelDir, Dir) ->
+    case config:get_boolean("couchdb", "rename_on_delete", false) of
+        true ->
+            couch_file:rename_dir(Dir);
+        false ->
+            couch_file:nuke_dir(RootDelDir, Dir)
     end.

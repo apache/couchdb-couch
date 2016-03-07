@@ -36,7 +36,7 @@
 -export([append_raw_chunk/2, assemble_file_chunk/1, assemble_file_chunk/2]).
 -export([append_term/2, append_term/3, append_term_md5/2, append_term_md5/3]).
 -export([write_header/2, read_header/1]).
--export([delete/3, nuke_dir/2, init_delete_dir/1]).
+-export([delete/3, nuke_dir/2, rename_dir/1, init_delete_dir/1]).
 
 % gen_server callbacks
 -export([init/1, terminate/2, code_change/3]).
@@ -288,6 +288,16 @@ nuke_dir(RootDelDir, Dir) ->
             ok
     end.
 
+rename_dir(Original) ->
+    case filelib:is_dir(Original) of
+        true ->
+            Suffix = deleted_filename_suffix(),
+            DelDir = io_lib:format("~s.~s.deleted", [Original, Suffix]),
+            ok = file:rename(Original, DelDir),
+            update_mtime(DelDir);
+        false ->
+            ok
+    end.
 
 init_delete_dir(RootDir) ->
     Dir = filename:join(RootDir,".delete"),
