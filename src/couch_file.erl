@@ -220,8 +220,9 @@ close(Fd) ->
 
 delete(RootDir, Filepath, Options) ->
     Async = not lists:member(sync, Options),
+    Compaction = lists:member(compaction, Options),
     Rename = lists:member(rename, Options),
-    DelFile = deleted_filename(RootDir, Filepath, Rename),
+    DelFile = deleted_filename(RootDir, Filepath, Rename and not Compaction),
     case file:rename(Filepath, DelFile) of
         ok when Rename ->
             update_mtime(DelFile);

@@ -25,6 +25,8 @@ setup() ->
     {ok, Db} = couch_db:create(DbName, []),
     Db.
 
+setup(compact) ->
+    setup(rename);
 setup(rename) ->
     config:set("couchdb", "rename_on_delete", "true", false),
     setup();
@@ -35,6 +37,8 @@ teardown(Db) ->
     (catch couch_db:close(Db)),
     (catch file:delete(Db#db.filepath)).
 
+teardown(compact, Db) ->
+    teardown(rename, Db);
 teardown(rename, Db) ->
     config:set("couchdb", "rename_on_delete", "false", false),
     teardown(Db);
@@ -50,6 +54,7 @@ delete_db_test_() ->
             fun start/0, fun test_util:stop/1,
             [
                 make_test_case(rename, [fun should_rename_on_delete/2]),
+                make_test_case(compact, [fun should_rename_on_compaction/2]),
                 make_test_case(delete, [fun should_delete/2])
             ]
         }
@@ -74,6 +79,19 @@ should_rename_on_delete(_, #db{filepath = Origin, name = DbName}) ->
         ?assert(filelib:is_regular(Renamed))
     end).
 
+should_rename_on_compaction(_, #db{filepath = Origin, name = DbName}) ->
+    ?_test(begin
+        ?assert(filelib:is_regular(Origin)),
+        ?assertMatch(ok, couch_server:delete(DbName, [compaction])),
+        ?assertNot(filelib:is_regular(Origin)),
+        CompactedFiles = compacted_files(Origin),
+        ?assertMatch([_], CompactedFiles),
+        [Renamed] = CompactedFiles,
+        ?assertEqual(
+            filename:extension(Origin), filename:extension(Renamed)),
+        ?assert(filelib:is_regular(Renamed))
+    end).
+
 should_delete(_, #db{filepath = Origin, name = DbName}) ->
     ?_test(begin
         ?assert(filelib:is_regular(Origin)),
@@ -84,3 +102,9 @@ should_delete(_, #db{filepath = Origin, name = DbName}) ->
 
 deleted_files(ViewFile) ->
     filelib:wildcard(filename:rootname(ViewFile) ++ "*.deleted.*").
+
+compacted_files(ViewFile) ->
+    RootDir = filename:dirname(ViewFile),
+    DelDir = filename:join(RootDir, ".delete"),
+    {ok, Files} = file:list_dir(DelDir),
+    [filename:join(DelDir, File) || File <- Files].
