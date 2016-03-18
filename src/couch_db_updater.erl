@@ -43,10 +43,8 @@ init({DbName, Filepath, Fd, Options}) ->
         ok = couch_file:write_header(Fd, Header),
         % delete any old compaction files that might be hanging around
         RootDir = config:get("couchdb", "database_dir", "."),
-        DelOpts = [compaction],
-        couch_server:delete_file(RootDir, Filepath ++ ".compact", DelOpts),
-        couch_server:delete_file(RootDir, Filepath ++ ".compact.data",DelOpts),
-        couch_server:delete_file(RootDir, Filepath ++ ".compact.meta",DelOpts);
+        couch_server:delete_with_exts(RootDir, Filepath,
+            [".compact", ".compact.data", ".compact.meta"], [compaction]);
     false ->
         case couch_file:read_header(Fd) of
         {ok, Header} ->

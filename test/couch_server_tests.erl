@@ -53,9 +53,11 @@ delete_db_test_() ->
             setup,
             fun start/0, fun test_util:stop/1,
             [
-                make_test_case(rename, [fun should_rename_on_delete/2]),
+                make_test_case(rename, [fun should_rename_on_delete/2,
+                    fun should_rename_with_exts/2]),
                 make_test_case(compact, [fun should_rename_on_compaction/2]),
-                make_test_case(delete, [fun should_delete/2])
+                make_test_case(delete, [fun should_delete/2,
+                    fun should_delete_with_exts/2])
             ]
         }
     }.
@@ -100,11 +102,48 @@ should_delete(_, #db{filepath = Origin, name = DbName}) ->
         ?assertMatch([], deleted_files(Origin))
     end).
 
+should_rename_with_exts(_, #db{filepath = Origin}) ->
+    ?_test(begin
+        ?assert(filelib:is_regular(Origin)),
+        Exts = [".compact", ".compact.data", ".compact.meta"],
+        [file:copy(Origin, Origin ++ Ext) || Ext <- Exts],
+        CompactionFiles = compaction_files(Origin),
+        ?assertEqual(3, length(CompactionFiles)),
+        RootDir = filename:dirname(Origin),
+        ?assertMatch(ok, couch_server:delete_with_exts(RootDir, Origin,
+            Exts, [compaction])),
+        ?assertEqual([], compaction_files(Origin)),
+        ?assertEqual(3, length(compacted_files(Origin))),
+        ?assertEqual([], deleted_files(Origin)),
+        ?assert(filelib:is_regular(Origin))
+    end).
+
+should_delete_with_exts(_, #db{filepath = Origin}) ->
+    ?_test(begin
+        ?assert(filelib:is_regular(Origin)),
+        Exts = [".compact", ".compact.data", ".compact.meta"],
+        [file:copy(Origin, Origin ++ Ext) || Ext <- Exts],
+        CompactionFiles = compaction_files(Origin),
+        ?assertEqual(3, length(CompactionFiles)),
+        RootDir = filename:dirname(Origin),
+        ?assertMatch(ok, couch_server:delete_with_exts(RootDir, Origin, Exts)),
+        ?assertEqual([], compaction_files(Origin)),
+        ?assertEqual([], compacted_files(Origin)),
+        ?assertEqual([], deleted_files(Origin)),
+        ?assert(filelib:is_regular(Origin))
+    end).
+
 deleted_files(ViewFile) ->
     filelib:wildcard(filename:rootname(ViewFile) ++ "*.deleted.*").
 
 compacted_files(ViewFile) ->
     RootDir = filename:dirname(ViewFile),
-    DelDir = filename:join(RootDir, ".delete"),
-    {ok, Files} = file:list_dir(DelDir),
-    [filename:join(DelDir, File) || File <- Files].
+    BaseName = filename:basename(ViewFile, ".couch"),
+    Pattern = filename:join([RootDir, ".delete", BaseName]) ++ "*",
+    [F || F <- filelib:wildcard(Pattern)].
+
+compaction_files(ViewFile) ->
+    RootDir = filename:dirname(ViewFile),
+    BaseName = filename:basename(ViewFile, ".couch"),
+    Pattern = filename:join(RootDir, BaseName) ++ "*",
+    [F || F <- filelib:wildcard(Pattern), F /= ViewFile].

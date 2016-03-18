@@ -26,6 +26,7 @@
 -export([handle_config_change/5, handle_config_terminate/3]).
 
 -export([delete_file/2, delete_file/3, delete_dir/2]).
+-export([delete_with_exts/3, delete_with_exts/4]).
 
 -include_lib("couch/include/couch_db.hrl").
 
@@ -454,9 +455,8 @@ handle_call({delete, DbName, Options}, _From, Server) ->
         %% Delete any leftover compaction files. If we don't do this a
         %% subsequent request for this DB will try to open them to use
         %% as a recovery.
-        lists:foreach(fun(Ext) ->
-            delete_file(Server#server.root_dir, FullFilepath ++ Ext)
-        end, [".compact", ".compact.data", ".compact.meta"]),
+        delete_with_exts(Server#server.root_dir, FullFilepath,
+            [".compact", ".compact.data", ".compact.meta"]),
 
         couch_db_plugin:on_delete(DbName, Options),
 
@@ -541,13 +541,9 @@ db_closed(Server, Options) ->
 delete_file(RootDir, FullFilePath) ->
     delete_file(RootDir, FullFilePath, []).
 
-delete_file(RootDir, FullFilePath, Options) ->
-    case config:get_boolean("couchdb", "rename_on_delete", false) of
-        true ->
-            couch_file:delete(RootDir, FullFilePath, [rename | Options]);
-        false ->
-            couch_file:delete(RootDir, FullFilePath, Options)
-    end.
+delete_file(RootDir, FullFilePath, Options0) ->
+    Options = maybe_modify_options(Options0),
+    couch_file:delete(RootDir, FullFilePath, Options).
 
 delete_dir(RootDelDir, Dir) ->
     case config:get_boolean("couchdb", "rename_on_delete", false) of
@@ -555,4 +551,19 @@ delete_dir(RootDelDir, Dir) ->
             couch_file:rename_dir(Dir);
         false ->
             couch_file:nuke_dir(RootDelDir, Dir)
+    end.
+
+delete_with_exts(RootDir, FullFilePath, Exts) ->
+    delete_with_exts(RootDir, FullFilePath, Exts, []).
+
+delete_with_exts(RootDir, FullFilePath, Exts, Options0) ->
+    Options = maybe_modify_options(Options0),
+    lists:foreach(fun(Ext) ->
+        couch_file:delete(RootDir, FullFilePath ++ Ext, Options)
+    end, Exts).
+
+maybe_modify_options(Options0) ->
+    case config:get_boolean("couchdb", "rename_on_delete", false) of
+        true -> [rename | Options0];
+        false -> Options0
     end.
