@@ -542,7 +542,7 @@ delete_file(RootDir, FullFilePath) ->
     delete_file(RootDir, FullFilePath, []).
 
 delete_file(RootDir, FullFilePath, Options0) ->
-    Options = maybe_modify_options(Options0),
+    Options = select_deletion_strategy(Options0),
     couch_file:delete(RootDir, FullFilePath, Options).
 
 delete_dir(RootDelDir, Dir) ->
@@ -557,13 +557,18 @@ delete_with_exts(RootDir, FullFilePath, Exts) ->
     delete_with_exts(RootDir, FullFilePath, Exts, []).
 
 delete_with_exts(RootDir, FullFilePath, Exts, Options0) ->
-    Options = maybe_modify_options(Options0),
+    Options = select_deletion_strategy(Options0),
     lists:foreach(fun(Ext) ->
         couch_file:delete(RootDir, FullFilePath ++ Ext, Options)
     end, Exts).
 
-maybe_modify_options(Options0) ->
+select_deletion_strategy(Options) ->
+    Compaction = lists:member(compaction, Options),
     case config:get_boolean("couchdb", "rename_on_delete", false) of
-        true -> [rename | Options0];
-        false -> Options0
+        true when Compaction ->
+            [{strategy, move} | lists:delete(compaction, Options)];
+        true ->
+            [{strategy, rename} | Options];
+        false ->
+            [{strategy, delete} | Options]
     end.

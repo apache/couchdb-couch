@@ -220,11 +220,10 @@ close(Fd) ->
 
 delete(RootDir, Filepath, Options) ->
     Async = not lists:member(sync, Options),
-    Compaction = lists:member(compaction, Options),
-    Rename = lists:member(rename, Options),
-    DelFile = deleted_filename(RootDir, Filepath, Rename and not Compaction),
+    Strategy = couch_util:get_value(strategy, Options, delete),
+    DelFile = deleted_filename(RootDir, Filepath, Strategy),
     case file:rename(Filepath, DelFile) of
-        ok when Rename ->
+        ok when Strategy /= delete ->
             Now = calendar:local_time(),
             case file:change_time(DelFile, Now) of
                 ok -> {ok, {renamed, DelFile}};
@@ -245,15 +244,15 @@ delete_file(FilePath) ->
         Else -> Else
     end.
 
-deleted_filename(RootDir, Original, false) ->
+deleted_filename(_RootDir, Original, rename) ->
+    deleted_filename(Original, "deleted");
+deleted_filename(RootDir, Original, _Strategy) ->
     Tokens = lists:filter(fun(Token) ->
         not lists:member(Token, ["shards", ".shards", "mrview"])
     end, string:tokens(Original -- RootDir, "/")),
     DelFile = filename:join([RootDir,".delete", string:join(Tokens, ":")]),
     Ending = io_lib:format("~6s", [couch_uuids:random()]),
-    deleted_filename(DelFile, Ending);
-deleted_filename(_RootDir, Original, true) ->
-    deleted_filename(Original, "deleted").
+    deleted_filename(DelFile, Ending).
 
 deleted_filename(Original, Ending) ->
     RootName = filename:rootname(Original),
