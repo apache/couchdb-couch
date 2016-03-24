@@ -247,13 +247,7 @@ delete_file(FilePath) ->
 deleted_filename(_RootDir, Original, rename) ->
     deleted_filename(Original, "deleted");
 deleted_filename(RootDir, Original, _Strategy) ->
-    Tokens = lists:foldl(fun
-        ("shards", Acc) when length(Acc) =:= 0 -> Acc;
-        (".shards", Acc) when length(Acc) =:= 0 -> Acc;
-        ("mrview", Acc) when length(Acc) >= 2 -> Acc;
-        (Token, Acc) -> [Token | Acc]
-    end, [], string:tokens(Original -- RootDir, "/")),
-    DelFileName = string:join(lists:reverse(Tokens), ":"),
+    DelFileName = deleted_filename_base(RootDir, Original),
     DelFile = filename:join([RootDir,".delete", DelFileName]),
     Ending = io_lib:format("~6s", [couch_uuids:random()]),
     deleted_filename(DelFile, Ending).
@@ -263,6 +257,18 @@ deleted_filename(Original, Ending) ->
     Suffix = deleted_filename_suffix(),
     Extention = filename:extension(Original),
     io_lib:format("~s.~s.~s~s", [RootName, Suffix, Ending, Extention]).
+
+deleted_filename_base(RootDir, FullPath) ->
+    Shard = "\.?shards/([0-9a-f]{8}-[0-9a-f]{8})",
+    User = "(.+)",
+    ViewFile = "(?:mrview/(.+\.view))",
+    DbFile = "(.+\.couch)",
+    Pattern = "^~s(?:/~s)?(?:/~s)?(?:/(?:~s|~s))$",
+    RegExp =  io_lib:format(Pattern, [RootDir, Shard, User, ViewFile, DbFile]),
+    {ok, MP} = re:compile(RegExp),
+    {match, Tokens} = re:run(FullPath, MP, [{capture, all_but_first, list}]),
+    Name0 = string:join([T || T <- Tokens, T /= []], "/"),
+    re:replace(Name0, "/", ":", [global, {return, list}]).
 
 deleted_filename_suffix() ->
     {{Y, Mon, D}, {H, Min, S}} = calendar:universal_time(),
