@@ -259,10 +259,10 @@ deleted_filename(Original, Ending) ->
     io_lib:format("~s.~s.~s~s", [RootName, Suffix, Ending, Extention]).
 
 deleted_filename_base(RootDir, FullPath) ->
-    Shard = "\.?shards/([0-9a-f]{8}-[0-9a-f]{8})",
+    Shard = "\\.?shards/([0-9a-f]{8}-[0-9a-f]{8})",
     User = "\\.?(.+)",
-    ViewFile = "(?:mrview/(.+\.view))",
-    DbFile = "(.+\.couch)",
+    ViewFile = "(?:mrview/(.+\\.view))",
+    DbFile = "(.+\\.couch)",
     Pattern = "^~s(?:/~s)?(?:/~s)?(?:/(?:~s|~s))$",
     RegExp =  io_lib:format(Pattern, [RootDir, Shard, User, ViewFile, DbFile]),
     {ok, MP} = re:compile(RegExp),
