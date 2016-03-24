@@ -268,7 +268,7 @@ deleted_filename_base(RootDir, FullPath) ->
     {ok, MP} = re:compile(RegExp),
     {match, Tokens} = re:run(FullPath, MP, [{capture, all_but_first, list}]),
     Name0 = string:join([T || T <- Tokens, T /= []], "/"),
-    re:replace(Name0, "/", ":", [global, {return, list}]).
+    re:replace(Name0, "/", "#", [global, {return, list}]).
 
 deleted_filename_suffix() ->
     {{Y, Mon, D}, {H, Min, S}} = calendar:universal_time(),
@@ -702,14 +702,14 @@ make_plain_fixtures(DbNames) ->
             "/srv/data/views"
                 "/.~s_design/mrview/3133e28517e89a3e11435dd5ac4ad85a.view",
             ["/srv/data/views"
-                "/.delete/.~s_design:3133e28517e89a3e11435dd5ac4ad85a",".view"]
+                "/.delete/.~s_design#3133e28517e89a3e11435dd5ac4ad85a",".view"]
         },
         {
             "/srv/data/dbs",
             "/srv/data/dbs/shards/"
                 "00000000-1fffffff/~s.1458336317.couch",
             ["/srv/data/dbs/.delete/"
-                "00000000-1fffffff:~s.1458336317", ".couch"]
+                "00000000-1fffffff#~s.1458336317", ".couch"]
         },
         {
             "/srv/data/views",
@@ -717,8 +717,8 @@ make_plain_fixtures(DbNames) ->
                 "00000000-1fffffff/~s.1458336317_design"
                 "/mrview/3133e28517e89a3e11435dd5ac4ad85a.view",
             ["/srv/data/views/.delete/"
-                "00000000-1fffffff:~s.1458336317_design"
-                ":3133e28517e89a3e11435dd5ac4ad85a", ".view"]
+                "00000000-1fffffff#~s.1458336317_design"
+                "#3133e28517e89a3e11435dd5ac4ad85a", ".view"]
         }
     ],
     lists:flatmap(fun(DbName) ->
@@ -737,21 +737,21 @@ make_deep_fixtures(UserNames, DbNames) ->
         {
             "/srv/data/dbs",
             "/srv/data/dbs/~s/~s.couch",
-            ["/srv/data/dbs/.delete/~s:~s", ".couch"]
+            ["/srv/data/dbs/.delete/~s#~s", ".couch"]
         },
         {
             "/srv/data/views",
             "/srv/data/views"
                 "/.~s/.~s_design/mrview/3133e28517e89a3e11435dd5ac4ad85a.view",
             ["/srv/data/views/.delete/"
-                ".~s:.~s_design:3133e28517e89a3e11435dd5ac4ad85a", ".view"]
+                ".~s#.~s_design#3133e28517e89a3e11435dd5ac4ad85a", ".view"]
         },
         {
             "/srv/data/dbs",
             "/srv/data/dbs/shards/"
                 "00000000-1fffffff/~s/~s.1458336317.couch",
             ["/srv/data/dbs/.delete/"
-                "00000000-1fffffff:~s:~s.1458336317", ".couch"]
+                "00000000-1fffffff#~s#~s.1458336317", ".couch"]
         },
         {
             "/srv/data/views",
@@ -759,13 +759,13 @@ make_deep_fixtures(UserNames, DbNames) ->
                 "00000000-1fffffff/~s/~s.1458336317_design"
                 "/mrview/3133e28517e89a3e11435dd5ac4ad85a.view",
             ["/srv/data/views/.delete/"
-                "00000000-1fffffff:~s:~s.1458336317_design"
-                ":3133e28517e89a3e11435dd5ac4ad85a", ".view"]
+                "00000000-1fffffff#~s#~s.1458336317_design"
+                "#3133e28517e89a3e11435dd5ac4ad85a", ".view"]
         }
     ],
     Variants = [[U, D] || U <- UserNames, D <- DbNames],
     lists:flatmap(fun([UserName, DbName]) ->
-        UserName1 = re:replace(UserName, "/", ":", [global, {return, list}]),
+        UserName1 = re:replace(UserName, "/", "#", [global, {return, list}]),
         lists:map(fun({RootDir, BeforeFmt, [AfterFmt, Ext]}) ->
             {
                 RootDir,
