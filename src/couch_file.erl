@@ -658,54 +658,116 @@ process_info(Pid) ->
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
-deleted_filename_test_() ->
-    [
-        should_create_proper_deleted_filename(db, ""),
-        should_create_proper_deleted_filename(view, ""),
-        should_create_proper_deleted_filename(db, "eiri"),
-        should_create_proper_deleted_filename(view, "eiri"),
-        should_create_proper_deleted_filename(db, "complext/dbname"),
-        should_create_proper_deleted_filename(view, "complext/dbname"),
-        should_create_proper_deleted_filename(db, "shards"),
-        should_create_proper_deleted_filename(view, "shards"),
-        should_create_proper_deleted_filename(db, ".shards"),
-        should_create_proper_deleted_filename(view, ".shards"),
-        should_create_proper_deleted_filename(db, "mrview"),
-        should_create_proper_deleted_filename(view, "mrview")
-    ].
+deleted_filename_plain_test_() ->
+    DbNames = ["koi", "shards", "mrview"],
+    Fixtures = make_plain_fixtures(DbNames),
+    lists:map(fun(Fixture) ->
+        should_create_proper_deleted_filename(Fixture)
+    end, Fixtures).
 
-should_create_proper_deleted_filename(FileType, Prepend) ->
-    {atom_to_list(FileType) ++ " with db name's prefix '" ++ Prepend ++ "'",
+deleted_filename_deep_test_() ->
+    UserNames = ["eiri", "shards", "mrview", "shards/eiri", "eiri/mrview"],
+    DbNames = ["koi", "shards", "mrview"],
+    Fixtures = make_deep_fixtures(UserNames, DbNames),
+    lists:map(fun(Fixture) ->
+        should_create_proper_deleted_filename(Fixture)
+    end, Fixtures).
+
+should_create_proper_deleted_filename({RootDir, Before, Expect, ExpectExt}) ->
+    {Before,
     ?_test(begin
-        {ok, RootDir, FullPath, ExpectPartsCount}
-            = make_filename_to_delete(FileType, Prepend),
-        DelPath = deleted_filename(RootDir, FullPath, move),
-        DelParts = filename:split(filename:flatten(DelPath) -- RootDir),
-        DelDir = lists:nth(2, DelParts),
-        DelFile = lists:nth(3, DelParts),
-        DelFilePartsCount = length(string:tokens(DelFile, ":")),
-        ?assertEqual(".delete", DelDir),
-        ?assertEqual(ExpectPartsCount, DelFilePartsCount)
+        After = deleted_filename(RootDir, Before, move),
+        ?assertEqual(6, length(After)),
+        BasePath = lists:nth(1, After),
+        Ext = lists:nth(6, After),
+        ?assertEqual(Expect, BasePath),
+        ?assertEqual(ExpectExt, Ext)
     end)}.
 
-make_filename_to_delete(db, Prepend) ->
-    RootDir = "/srv/data/dbs",
-    Shard = "00000000-1fffffff",
-    FileName = "koi.1458336317.couch",
-    FullPath = filename:join([RootDir, "shards", Shard,
-        Prepend, FileName]),
-    PrependParts = string:tokens(Prepend, "/"),
-    ExpectPartsCount = 2 + length(PrependParts),
-    {ok, RootDir, FullPath, ExpectPartsCount};
-make_filename_to_delete(view, Prepend) ->
-    RootDir = "/srv/data/views",
-    Shard = "00000000-1fffffff",
-    DDocName = "koi.1458336317_design",
-    FileName = "3133e28517e89a3e11435dd5ac4ad85a.view",
-    FullPath = filename:join([RootDir, "shards", Shard,
-        Prepend, DDocName, "mrview", FileName]),
-    PrependParts = string:tokens(Prepend, "/"),
-    ExpectPartsCount = 3 + length(PrependParts),
-    {ok, RootDir, FullPath, ExpectPartsCount}.
+make_plain_fixtures(DbNames) ->
+    BeforeAfterFmt = [
+        {
+            "/srv/data/dbs",
+            "/srv/data/dbs/~s.couch",
+            ["/srv/data/dbs/.delete/~s", ".couch"]
+        },
+        {
+            "/srv/data/views",
+            "/srv/data/views"
+                "/.~s_design/mrview/3133e28517e89a3e11435dd5ac4ad85a.view",
+            ["/srv/data/views"
+                "/.delete/.~s_design:3133e28517e89a3e11435dd5ac4ad85a",".view"]
+        },
+        {
+            "/srv/data/dbs",
+            "/srv/data/dbs/shards/"
+                "00000000-1fffffff/~s.1458336317.couch",
+            ["/srv/data/dbs/.delete/"
+                "00000000-1fffffff:~s.1458336317", ".couch"]
+        },
+        {
+            "/srv/data/views",
+            "/srv/data/views/.shards/"
+                "00000000-1fffffff/~s.1458336317_design"
+                "/mrview/3133e28517e89a3e11435dd5ac4ad85a.view",
+            ["/srv/data/views/.delete/"
+                "00000000-1fffffff:~s.1458336317_design"
+                ":3133e28517e89a3e11435dd5ac4ad85a", ".view"]
+        }
+    ],
+    lists:flatmap(fun(DbName) ->
+        lists:map(fun({RootDir, BeforeFmt, [AfterFmt, Ext]}) ->
+            {
+                RootDir,
+                filename:flatten(io_lib:format(BeforeFmt, [DbName])),
+                filename:flatten(io_lib:format(AfterFmt, [DbName])),
+                Ext
+            }
+        end, BeforeAfterFmt)
+    end, DbNames).
+
+make_deep_fixtures(UserNames, DbNames) ->
+    BeforeAfterFmt = [
+        {
+            "/srv/data/dbs",
+            "/srv/data/dbs/~s/~s.couch",
+            ["/srv/data/dbs/.delete/~s:~s", ".couch"]
+        },
+        {
+            "/srv/data/views",
+            "/srv/data/views"
+                "/.~s/.~s_design/mrview/3133e28517e89a3e11435dd5ac4ad85a.view",
+            ["/srv/data/views/.delete/"
+                ".~s:.~s_design:3133e28517e89a3e11435dd5ac4ad85a", ".view"]
+        },
+        {
+            "/srv/data/dbs",
+            "/srv/data/dbs/shards/"
+                "00000000-1fffffff/~s/~s.1458336317.couch",
+            ["/srv/data/dbs/.delete/"
+                "00000000-1fffffff:~s:~s.1458336317", ".couch"]
+        },
+        {
+            "/srv/data/views",
+            "/srv/data/views/.shards/"
+                "00000000-1fffffff/~s/~s.1458336317_design"
+                "/mrview/3133e28517e89a3e11435dd5ac4ad85a.view",
+            ["/srv/data/views/.delete/"
+                "00000000-1fffffff:~s:~s.1458336317_design"
+                ":3133e28517e89a3e11435dd5ac4ad85a", ".view"]
+        }
+    ],
+    Variants = [[U, D] || U <- UserNames, D <- DbNames],
+    lists:flatmap(fun([UserName, DbName]) ->
+        UserName1 = re:replace(UserName, "/", ":", [global, {return, list}]),
+        lists:map(fun({RootDir, BeforeFmt, [AfterFmt, Ext]}) ->
+            {
+                RootDir,
+                filename:flatten(io_lib:format(BeforeFmt, [UserName, DbName])),
+                filename:flatten(io_lib:format(AfterFmt, [UserName1, DbName])),
+                Ext
+            }
+        end, BeforeAfterFmt)
+    end, Variants).
 
 -endif.
