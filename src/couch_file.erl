@@ -260,7 +260,7 @@ deleted_filename(Original, Ending) ->
 
 deleted_filename_base(RootDir, FullPath) ->
     Shard = "\.?shards/([0-9a-f]{8}-[0-9a-f]{8})",
-    User = "(.+)",
+    User = "\\.?(.+)",
     ViewFile = "(?:mrview/(.+\.view))",
     DbFile = "(.+\.couch)",
     Pattern = "^~s(?:/~s)?(?:/~s)?(?:/(?:~s|~s))$",
@@ -702,7 +702,7 @@ make_plain_fixtures(DbNames) ->
             "/srv/data/views"
                 "/.~s_design/mrview/3133e28517e89a3e11435dd5ac4ad85a.view",
             ["/srv/data/views"
-                "/.delete/.~s_design#3133e28517e89a3e11435dd5ac4ad85a",".view"]
+                "/.delete/~s_design#3133e28517e89a3e11435dd5ac4ad85a", ".view"]
         },
         {
             "/srv/data/dbs",
@@ -744,7 +744,7 @@ make_deep_fixtures(UserNames, DbNames) ->
             "/srv/data/views"
                 "/.~s/.~s_design/mrview/3133e28517e89a3e11435dd5ac4ad85a.view",
             ["/srv/data/views/.delete/"
-                ".~s#.~s_design#3133e28517e89a3e11435dd5ac4ad85a", ".view"]
+                "~s#.~s_design#3133e28517e89a3e11435dd5ac4ad85a", ".view"]
         },
         {
             "/srv/data/dbs",
