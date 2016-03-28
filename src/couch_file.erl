@@ -262,7 +262,7 @@ deleted_filename_base(RootDir, FullPath) ->
     Shard = "\\.?shards/([0-9a-f]{8}-[0-9a-f]{8})",
     User = "\\.?(.+)",
     ViewFile = "(?:mrview/(.+\\.view))",
-    DbFile = "(.+\\.couch)",
+    DbFile = "(.+\\.couch.*)",
     Pattern = "^~s(?:/~s)?(?:/~s)?(?:/(?:~s|~s))$",
     RegExp =  io_lib:format(Pattern, [RootDir, Shard, User, ViewFile, DbFile]),
     {ok, MP} = re:compile(RegExp),
@@ -698,6 +698,16 @@ make_plain_fixtures(DbNames) ->
             ["/srv/data/dbs/.delete/~s", ".couch"]
         },
         {
+            "/srv/data/dbs",
+            "/srv/data/dbs/~s.couch.compact",
+            ["/srv/data/dbs/.delete/~s.couch", ".compact"]
+        },
+        {
+            "/srv/data/dbs",
+            "/srv/data/dbs/~s.couch.meta",
+            ["/srv/data/dbs/.delete/~s.couch", ".meta"]
+        },
+        {
             "/srv/data/views",
             "/srv/data/views"
                 "/.~s_design/mrview/3133e28517e89a3e11435dd5ac4ad85a.view",
@@ -710,6 +720,20 @@ make_plain_fixtures(DbNames) ->
                 "00000000-1fffffff/~s.1458336317.couch",
             ["/srv/data/dbs/.delete/"
                 "00000000-1fffffff#~s.1458336317", ".couch"]
+        },
+        {
+            "/srv/data/dbs",
+            "/srv/data/dbs/shards/"
+                "00000000-1fffffff/~s.1458336317.couch.compact",
+            ["/srv/data/dbs/.delete/"
+                "00000000-1fffffff#~s.1458336317.couch", ".compact"]
+        },
+        {
+            "/srv/data/dbs",
+            "/srv/data/dbs/shards/"
+                "00000000-1fffffff/~s.1458336317.couch.meta",
+            ["/srv/data/dbs/.delete/"
+                "00000000-1fffffff#~s.1458336317.couch", ".meta"]
         },
         {
             "/srv/data/views",
@@ -740,6 +764,16 @@ make_deep_fixtures(UserNames, DbNames) ->
             ["/srv/data/dbs/.delete/~s#~s", ".couch"]
         },
         {
+            "/srv/data/dbs",
+            "/srv/data/dbs/~s/~s.couch.compact",
+            ["/srv/data/dbs/.delete/~s#~s.couch", ".compact"]
+        },
+        {
+            "/srv/data/dbs",
+            "/srv/data/dbs/~s/~s.couch.meta",
+            ["/srv/data/dbs/.delete/~s#~s.couch", ".meta"]
+        },
+        {
             "/srv/data/views",
             "/srv/data/views"
                 "/.~s/.~s_design/mrview/3133e28517e89a3e11435dd5ac4ad85a.view",
@@ -752,6 +786,20 @@ make_deep_fixtures(UserNames, DbNames) ->
                 "00000000-1fffffff/~s/~s.1458336317.couch",
             ["/srv/data/dbs/.delete/"
                 "00000000-1fffffff#~s#~s.1458336317", ".couch"]
+        },
+        {
+            "/srv/data/dbs",
+            "/srv/data/dbs/shards/"
+                "00000000-1fffffff/~s/~s.1458336317.couch.compact",
+            ["/srv/data/dbs/.delete/"
+                "00000000-1fffffff#~s#~s.1458336317.couch", ".compact"]
+        },
+        {
+            "/srv/data/dbs",
+            "/srv/data/dbs/shards/"
+                "00000000-1fffffff/~s/~s.1458336317.couch.meta",
+            ["/srv/data/dbs/.delete/"
+                "00000000-1fffffff#~s#~s.1458336317.couch", ".meta"]
         },
         {
             "/srv/data/views",
