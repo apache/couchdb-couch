@@ -36,7 +36,7 @@
 -export([append_raw_chunk/2, assemble_file_chunk/1, assemble_file_chunk/2]).
 -export([append_term/2, append_term/3, append_term_md5/2, append_term_md5/3]).
 -export([write_header/2, read_header/1]).
--export([delete/2, delete/3, nuke_dir/2, init_delete_dir/1]).
+-export([delete/3, nuke_dir/2, rename_dir/1, init_delete_dir/1]).
 
 % gen_server callbacks
 -export([init/1, terminate/2, code_change/3]).
@@ -121,7 +121,7 @@ append_term_md5(Fd, Term, Options) ->
 
 append_binary(Fd, Bin) ->
     ioq:call(Fd, {append_bin, assemble_file_chunk(Bin)}, erlang:get(io_priority)).
-    
+
 append_binary_md5(Fd, Bin) ->
     ioq:call(Fd,
         {append_bin, assemble_file_chunk(Bin, couch_crypto:hash(md5, Bin))},
@@ -218,24 +218,51 @@ close(Fd) ->
     gen_server:call(Fd, close, infinity).
 
 
-delete(RootDir, Filepath) ->
-    delete(RootDir, Filepath, true).
-
-
-delete(RootDir, Filepath, Async) ->
-    DelFile = filename:join([RootDir,".delete", ?b2l(couch_uuids:random())]),
+delete(RootDir, Filepath, Options) ->
+    Async = not lists:member(sync, Options),
+    Strategy = couch_util:get_value(strategy, Options, delete),
+    DelFile = deleted_filename(RootDir, Filepath, Strategy),
     case file:rename(Filepath, DelFile) of
-    ok ->
-        if (Async) ->
-            spawn(file, delete, [DelFile]),
-            ok;
-        true ->
-            file:delete(DelFile)
-        end;
-    Error ->
-        Error
+        ok when Strategy /= delete ->
+            Now = calendar:local_time(),
+            case file:change_time(DelFile, Now) of
+                ok -> {ok, {renamed, DelFile}};
+                Else -> Else
+            end;
+        ok when Async ->
+            spawn(fun() -> delete_file(DelFile) end),
+            {ok, deleted};
+        ok ->
+            delete_file(DelFile);
+        Error ->
+            Error
     end.
 
+delete_file(FilePath) ->
+    case file:delete(FilePath) of
+        ok -> {ok, deleted};
+        Else -> Else
+    end.
+
+deleted_filename(_RootDir, Original, rename) ->
+    deleted_filename(Original, "deleted");
+deleted_filename(RootDir, Original, _Strategy) ->
+    DelFileName = couch_util:url_encode(Original -- RootDir),
+    DelFile = filename:join([RootDir,".delete", DelFileName]),
+    Ending = io_lib:format("~6s", [couch_uuids:random()]),
+    deleted_filename(DelFile, Ending).
+
+deleted_filename(Original, Ending) ->
+    RootName = filename:rootname(Original),
+    Suffix = deleted_filename_suffix(),
+    Extention = filename:extension(Original),
+    io_lib:format("~s.~s.~s~s", [RootName, Suffix, Ending, Extention]).
+
+deleted_filename_suffix() ->
+    {{Y, Mon, D}, {H, Min, S}} = calendar:universal_time(),
+    io_lib:format("~w~2.10.0B~2.10.0B"
+        ".~2.10.0B~2.10.0B~2.10.0B",
+        [Y, Mon, D, H, Min, S]).
 
 nuke_dir(RootDelDir, Dir) ->
     FoldFun = fun(File) ->
@@ -245,7 +272,7 @@ nuke_dir(RootDelDir, Dir) ->
                 ok = nuke_dir(RootDelDir, Path),
                 file:del_dir(Path);
             false ->
-                delete(RootDelDir, Path, false)
+                delete(RootDelDir, Path, [sync])
         end
     end,
     case file:list_dir(Dir) of
@@ -256,6 +283,16 @@ nuke_dir(RootDelDir, Dir) ->
             ok
     end.
 
+rename_dir(Original) ->
+    case filelib:is_dir(Original) of
+        true ->
+            Suffix = deleted_filename_suffix(),
+            DelDir = io_lib:format("~s.~s.deleted", [Original, Suffix]),
+            ok = file:rename(Original, DelDir),
+            ok = file:change_time(DelDir, calendar:local_time());
+        false ->
+            ok
+    end.
 
 init_delete_dir(RootDir) ->
     Dir = filename:join(RootDir,".delete"),
@@ -610,3 +647,156 @@ process_info(Pid) ->
         {couch_file_fd, {Fd, InitialName}} ->
             {Fd, InitialName}
     end.
+
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+deleted_filename_plain_test_() ->
+    DbNames = ["koi", "k.io", "k+oi", "k%2Foi", "[(%?#)]"],
+    Fixtures = make_plain_fixtures(DbNames),
+    lists:map(fun(Fixture) ->
+        should_create_proper_deleted_filename(Fixture)
+    end, Fixtures).
+
+deleted_filename_deep_test_() ->
+    UserNames = ["eiri", "shards/eiri", "shards%2Feiri"],
+    DbNames = ["koi", "k.io", "k+oi", "k%2Foi", "[(%?#)]"],
+    Fixtures = make_deep_fixtures(UserNames, DbNames),
+    lists:map(fun(Fixture) ->
+        should_create_proper_deleted_filename(Fixture)
+    end, Fixtures).
+
+should_create_proper_deleted_filename({RootDir, Before, ExpectExt}) ->
+    {Before,
+    ?_test(begin
+        After = deleted_filename(RootDir, Before, move),
+        ?assertEqual(6, length(After)),
+        DelPath = lists:nth(1, After),
+        ["/", ".delete", DelFileName] = filename:split(DelPath -- RootDir),
+        Expect = filename:rootname(Before -- RootDir),
+        ?assertEqual(Expect, http_uri:decode(DelFileName)),
+        Ext = lists:nth(6, After),
+        ?assertEqual(ExpectExt, Ext)
+    end)}.
+
+make_plain_fixtures(DbNames) ->
+    Formatters = [
+        {
+            "/srv/data/dbs",
+            "/srv/data/dbs/~s.couch",
+            ".couch"
+        },
+        {
+            "/srv/data/dbs",
+            "/srv/data/dbs/~s.couch.compact",
+             ".compact"
+        },
+        {
+            "/srv/data/dbs",
+            "/srv/data/dbs/~s.couch.meta",
+            ".meta"
+        },
+        {
+            "/srv/data/views",
+            "/srv/data/views"
+                "/.~s_design/mrview/3133e28517e89a3e11435dd5ac4ad85a.view",
+            ".view"
+        },
+        {
+            "/srv/data/dbs",
+            "/srv/data/dbs/shards/"
+                "00000000-1fffffff/~s.1458336317.couch",
+            ".couch"
+        },
+        {
+            "/srv/data/dbs",
+            "/srv/data/dbs/shards/"
+                "00000000-1fffffff/~s.1458336317.couch.compact",
+            ".compact"
+        },
+        {
+            "/srv/data/dbs",
+            "/srv/data/dbs/shards/"
+                "00000000-1fffffff/~s.1458336317.couch.meta",
+            ".meta"
+        },
+        {
+            "/srv/data/views",
+            "/srv/data/views/.shards/"
+                "00000000-1fffffff/~s.1458336317_design"
+                "/mrview/3133e28517e89a3e11435dd5ac4ad85a.view",
+            ".view"
+        }
+    ],
+    lists:flatmap(fun(DbName) ->
+        lists:map(fun({RootDir, Format, Ext}) ->
+            {
+                RootDir,
+                filename:flatten(io_lib:format(Format, [DbName])),
+                Ext
+            }
+        end, Formatters)
+    end, DbNames).
+
+make_deep_fixtures(UserNames, DbNames) ->
+    Formatters = [
+        {
+            "/srv/data/dbs",
+            "/srv/data/dbs/~s/~s.couch",
+            ".couch"
+        },
+        {
+            "/srv/data/dbs",
+            "/srv/data/dbs/~s/~s.couch.compact",
+            ".compact"
+        },
+        {
+            "/srv/data/dbs",
+            "/srv/data/dbs/~s/~s.couch.meta",
+            ".meta"
+        },
+        {
+            "/srv/data/views",
+            "/srv/data/views"
+                "/.~s/.~s_design/mrview/3133e28517e89a3e11435dd5ac4ad85a.view",
+            ".view"
+        },
+        {
+            "/srv/data/dbs",
+            "/srv/data/dbs/shards/"
+                "00000000-1fffffff/~s/~s.1458336317.couch",
+            ".couch"
+        },
+        {
+            "/srv/data/dbs",
+            "/srv/data/dbs/shards/"
+                "00000000-1fffffff/~s/~s.1458336317.couch.compact",
+            ".compact"
+        },
+        {
+            "/srv/data/dbs",
+            "/srv/data/dbs/shards/"
+                "00000000-1fffffff/~s/~s.1458336317.couch.meta",
+            ".meta"
+        },
+        {
+            "/srv/data/views",
+            "/srv/data/views/.shards/"
+                "00000000-1fffffff/~s/~s.1458336317_design"
+                "/mrview/3133e28517e89a3e11435dd5ac4ad85a.view",
+            ".view"
+        }
+    ],
+    Variants = [[U, D] || U <- UserNames, D <- DbNames],
+    lists:flatmap(fun([UserName, DbName]) ->
+        lists:map(fun({RootDir, Format, Ext}) ->
+            {
+                RootDir,
+                filename:flatten(io_lib:format(Format, [UserName, DbName])),
+                Ext
+            }
+        end, Formatters)
+    end, Variants).
+
+-endif.

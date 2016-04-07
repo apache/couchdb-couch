@@ -25,7 +25,8 @@
 % config_listener api
 -export([handle_config_change/5, handle_config_terminate/3]).
 
--export([delete_file/3]).
+-export([delete_file/2, delete_file/3, delete_dir/2]).
+-export([delete_with_exts/3, delete_with_exts/4]).
 
 -include_lib("couch/include/couch_db.hrl").
 
@@ -454,10 +455,8 @@ handle_call({delete, DbName, Options}, _From, Server) ->
         %% Delete any leftover compaction files. If we don't do this a
         %% subsequent request for this DB will try to open them to use
         %% as a recovery.
-        lists:foreach(fun(Ext) ->
-            couch_file:delete(Server#server.root_dir, FullFilepath ++ Ext)
-        end, [".compact", ".compact.data", ".compact.meta"]),
-        couch_file:delete(Server#server.root_dir, FullFilepath ++ ".compact"),
+        delete_with_exts(Server#server.root_dir, FullFilepath,
+            [".compact", ".compact.data", ".compact.meta"]),
 
         couch_db_plugin:on_delete(DbName, Options),
 
@@ -539,30 +538,37 @@ db_closed(Server, Options) ->
         true -> Server
     end.
 
-delete_file(RootDir, FullFilePath, Options) ->
-    Async = not lists:member(sync, Options),
-    RenameOnDelete = config:get_boolean("couchdb", "rename_on_delete", false),
-    case {Async, RenameOnDelete} of
-        {_, true} ->
-            rename_on_delete(FullFilePath);
-        {Async, false} ->
-            case couch_file:delete(RootDir, FullFilePath, Async) of
-                ok -> {ok, deleted};
-                Else -> Else
-            end
+delete_file(RootDir, FullFilePath) ->
+    delete_file(RootDir, FullFilePath, []).
+
+delete_file(RootDir, FullFilePath, Options0) ->
+    Options = select_deletion_strategy(Options0),
+    couch_file:delete(RootDir, FullFilePath, Options).
+
+delete_dir(RootDelDir, Dir) ->
+    case config:get_boolean("couchdb", "rename_on_delete", false) of
+        true ->
+            couch_file:rename_dir(Dir);
+        false ->
+            couch_file:nuke_dir(RootDelDir, Dir)
     end.
 
-rename_on_delete(Original) ->
-    DeletedFileName = deleted_filename(Original),
-    case file:rename(Original, DeletedFileName) of
-        ok -> {ok, {renamed, DeletedFileName}};
-        Else -> Else
-    end.
+delete_with_exts(RootDir, FullFilePath, Exts) ->
+    delete_with_exts(RootDir, FullFilePath, Exts, []).
 
-deleted_filename(Original) ->
-    {{Y,Mon,D}, {H,Min,S}} = calendar:universal_time(),
-    Suffix = lists:flatten(
-        io_lib:format(".~w~2.10.0B~2.10.0B."
-            ++ "~2.10.0B~2.10.0B~2.10.0B.deleted"
-            ++ filename:extension(Original), [Y,Mon,D,H,Min,S])),
-    filename:rootname(Original) ++ Suffix.
+delete_with_exts(RootDir, FullFilePath, Exts, Options0) ->
+    Options = select_deletion_strategy(Options0),
+    lists:foreach(fun(Ext) ->
+        couch_file:delete(RootDir, FullFilePath ++ Ext, Options)
+    end, Exts).
+
+select_deletion_strategy(Options) ->
+    Compaction = lists:member(compaction, Options),
+    case config:get_boolean("couchdb", "rename_on_delete", false) of
+        true when Compaction ->
+            [{strategy, move} | lists:delete(compaction, Options)];
+        true ->
+            [{strategy, rename} | Options];
+        false ->
+            [{strategy, delete} | Options]
+    end.
