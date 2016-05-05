@@ -20,7 +20,7 @@
 
 -export([start_couch/0, start_couch/1, start_couch/2, stop_couch/0, stop_couch/1]).
 -export([start_config/1, stop_config/1]).
--export([start_applications/1, stop_applications/1]).
+-export([load_applications_with_stats/0, start_applications/1, stop_applications/1]).
 
 -export([stop_sync/1, stop_sync/2, stop_sync/3]).
 
