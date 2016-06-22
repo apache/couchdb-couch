@@ -34,6 +34,7 @@
 -export([callback_exists/3, validate_callback_exists/3]).
 -export([with_proc/4]).
 -export([check_md5/2]).
+-export([utc_string/0]).
 
 -include_lib("couch/include/couch_db.hrl").
 
@@ -643,3 +644,12 @@ with_proc(M, F, A, Timeout) ->
         erlang:demonitor(Ref, [flush]),
         {error, timeout}
     end.
+
+
+utc_string() ->
+    {{Year, Month, Day}, {Hour, Minute, Second}} =
+        calendar:now_to_universal_time(os:timestamp()),
+    lists:flatten(
+        io_lib:format("~.4.0w-~.2.0w-~.2.0wT~.2.0w:~.2.0w:~.2.0wZ",
+            [Year, Month, Day, Hour, Minute, Second])
+    ).

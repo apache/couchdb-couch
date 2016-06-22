@@ -43,19 +43,21 @@
     get_epochs/1,
     get_filepath/1,
     get_instance_start_time/1,
-    get_last_purged/1,
+    get_oldest_purge_seq/1,
     get_pid/1,
+    get_purge_seq/1,
+    get_purged_docs_limit/1,
     get_revs_limit/1,
     get_security/1,
     get_update_seq/1,
     get_user_ctx/1,
     get_uuid/1,
-    get_purge_seq/1,
 
     is_db/1,
     is_system_db/1,
     is_clustered/1,
 
+    set_purged_docs_limit/2,
     set_revs_limit/2,
     set_security/2,
     set_user_ctx/2,
@@ -69,6 +71,7 @@
     open_doc/2,
     open_doc/3,
     open_doc_revs/4,
+    open_purged_docs/2,
     open_doc_int/3,
     get_doc_info/2,
     get_full_doc_info/2,
@@ -82,7 +85,6 @@
     update_docs/2,
     update_docs/3,
     delete_doc/3,
-
     purge_docs/2,
 
     with_stream/3,
@@ -97,6 +99,8 @@
     fold_changes/4,
     fold_changes/5,
     count_changes_since/2,
+    fold_purged_docs/4,
+    fold_purged_docs/5,
 
     calculate_start_seq/3,
     owner_of/2,
@@ -363,6 +367,8 @@ find_missing([{Id, Revs}|RestIdRevs], [FullInfo | RestLookupInfo])
 find_missing([{Id, Revs}|RestIdRevs], [not_found | RestLookupInfo]) ->
     [{Id, Revs, []} | find_missing(RestIdRevs, RestLookupInfo)].
 
+
+%   returns {ok, DocInfo} or not_found
 get_doc_info(Db, Id) ->
     case get_full_doc_info(Db, Id) of
     #full_doc_info{} = FDI ->
@@ -371,7 +377,7 @@ get_doc_info(Db, Id) ->
         Else
     end.
 
-%   returns {ok, DocInfo} or not_found
+
 get_full_doc_info(Db, Id) ->
     [Result] = get_full_doc_infos(Db, [Id]),
     Result.
@@ -379,8 +385,52 @@ get_full_doc_info(Db, Id) ->
 get_full_doc_infos(Db, Ids) ->
     couch_db_engine:open_docs(Db, Ids).
 
-purge_docs(#db{main_pid=Pid}, IdsRevs) ->
-    gen_server:call(Pid, {purge_docs, IdsRevs}).
+
+purge_docs(#db{main_pid=Pid}=Db, UUIdsIdsRevs) ->
+    purge_docs(#db{main_pid=Pid}=Db, UUIdsIdsRevs, interactive_edit).
+
+-spec purge_docs(#db{}, [{UUId, Id, [Rev]}], interactive_edit) ->
+        {ok, {PurgeSeq, [Reply]}} when
+    UUId     :: binary(),
+    Id       :: binary(),
+    Rev      :: {non_neg_integer(), binary()},
+    PurgeSeq :: non_neg_integer(),
+    Reply    :: {ok, []}
+              | {ok, [Rev]}.
+purge_docs(#db{main_pid=Pid}, UUIdsIdsRevs, interactive_edit) ->
+    gen_server:call(Pid, {purge_docs, UUIdsIdsRevs});
+
+purge_docs(#db{main_pid=Pid}=Db, UUIdsIdsRevs0, replicated_changes) ->
+    % filter out purge requests that have been already applied:
+    % their UUIDs exist in upurge_tree
+    UUIDs = [UUID || {UUID, _Id, _Revs} <- UUIdsIdsRevs0],
+    Results = open_purged_docs(Db, UUIDs),
+    UUIdsIdsRevs = lists:foldr(fun(
+        {not_found, UUIdIdrevs}, Acc0) -> [UUIdIdrevs|Acc0];
+        ({_, _}, Acc0) -> Acc0
+    end, [], lists:zip(Results, UUIdsIdsRevs0)),
+    case UUIdsIdsRevs of
+        [] -> {ok, []};
+        _ -> gen_server:call(Pid, {purge_docs, UUIdsIdsRevs})
+    end.
+
+
+-spec open_purged_docs(#db{}, [UUId]) -> [PurgedReq] when
+    UUId        :: binary(),
+    PurgedReq   :: {Id, [Rev]}
+                 | not_found,
+    Id          :: binary(),
+    Rev         :: {non_neg_integer(), binary()}.
+open_purged_docs(Db, UUIDs) ->
+    couch_db_engine:open_purged_docs(Db, UUIDs).
+
+
+set_purged_docs_limit(#db{main_pid=Pid}=Db, Limit)
+        when is_integer(Limit), Limit > 0 ->
+    check_is_admin(Db),
+    gen_server:call(Pid, {set_purged_docs_limit, Limit}, infinity);
+set_purged_docs_limit(_Db, _Limit) ->
+    throw(invalid_purged_docs_limit).
 
 get_after_doc_read_fun(#db{after_doc_read = Fun}) ->
     Fun.
@@ -400,10 +450,13 @@ get_user_ctx(?OLD_DB_REC = Db) ->
     ?OLD_DB_USER_CTX(Db).
 
 get_purge_seq(#db{}=Db) ->
-    {ok, couch_db_engine:get_purge_seq(Db)}.
+    couch_db_engine:get_purge_seq(Db).
 
-get_last_purged(#db{}=Db) ->
-    {ok, couch_db_engine:get_last_purged(Db)}.
+get_oldest_purge_seq(#db{}=Db) ->
+    {ok, couch_db_engine:get_oldest_purge_seq(Db)}.
+
+get_purged_docs_limit(#db{}=Db) ->
+    couch_db_engine:get_purged_docs_limit(Db).
 
 get_pid(#db{main_pid = Pid}) ->
     Pid.
@@ -995,6 +1048,7 @@ doc_tag(#doc{meta=Meta}) ->
         Else -> throw({invalid_doc_tag, Else})
     end.
 
+
 update_docs(Db, Docs0, Options, replicated_changes) ->
     increment_stat(Db, [couchdb, database_writes]),
     Docs = tag_docs(Docs0),
@@ -1075,7 +1129,6 @@ update_docs(Db, Docs0, Options, interactive_edit) ->
                         check_dup_atts(Doc)))
                 || Doc <- B] || B <- DocBuckets2],
         {DocBuckets4, IdRevs} = new_revs(DocBuckets3, [], []),
-
         {ok, CommitResults} = write_and_commit(Db, DocBuckets4, NonRepDocs, Options2),
 
         ResultsDict = lists:foldl(fun({Key, Resp}, ResultsAcc) ->
@@ -1085,6 +1138,7 @@ update_docs(Db, Docs0, Options, interactive_edit) ->
             dict:fetch(doc_tag(Doc), ResultsDict)
         end, Docs)}
     end.
+
 
 % Returns the first available document on disk. Input list is a full rev path
 % for the doc.
@@ -1395,6 +1449,14 @@ fold_docs(Db, UserFun, UserAcc) ->
 
 fold_docs(Db, UserFun, UserAcc, Options) ->
     couch_db_engine:fold_docs(Db, UserFun, UserAcc, Options).
+
+
+fold_purged_docs(Db, StartPurgeSeq, Fun, Acc) ->
+    fold_purged_docs(Db, StartPurgeSeq, Fun, Acc, []).
+
+
+fold_purged_docs(Db, StartPurgeSeq, UFun, UAcc, Opts) ->
+    couch_db_engine:fold_purged_docs(Db, StartPurgeSeq, UFun, UAcc, Opts).
 
 
 fold_local_docs(Db, UserFun, UserAcc, Options) ->
