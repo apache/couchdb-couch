@@ -22,6 +22,7 @@
 -export([proxy_authentication_handler/1, proxy_authentification_handler/1]).
 -export([cookie_auth_header/2]).
 -export([handle_session_req/1, handle_session_req/2]).
+-export([handle_delegated_session_req/1, handle_delegated_session_req/2]).
 
 -export([authenticate/2, verify_totp/2, maybe_upgrade_password_hash/6]).
 -export([ensure_cookie_auth_secret/0, make_cookie_time/0]).
@@ -270,6 +271,11 @@ cookie_auth_cookie(Req, User, Secret, TimeStamp) ->
         couch_util:encodeBase64Url(SessionData ++ ":" ++ ?b2l(Hash)),
         [{path, "/"}] ++ cookie_scheme(Req) ++ max_age()).
 
+make_cookie_hash(UserName, Secret, TimeStamp) ->
+    SessionData = UserName ++ ":" ++ erlang:integer_to_list(TimeStamp, 16),
+    Hash = crypto:sha_mac(Secret, SessionData),
+    couch_util:encodeBase64Url(SessionData ++ ":" ++ ?b2l(Hash)).
+
 ensure_cookie_auth_secret() ->
     case config:get("couch_httpd_auth", "secret", undefined) of
         undefined ->
@@ -278,6 +284,36 @@ ensure_cookie_auth_secret() ->
             NewSecret;
         Secret -> Secret
     end.
+prepare_cookie_values(Req, UserName, Password, UserProps, AuthModule, AuthCtx) ->
+    UserProps2 = maybe_upgrade_password_hash(Req, UserName, Password, UserProps, AuthModule, AuthCtx),
+    % setup the session cookie
+    Secret = ?l2b(ensure_cookie_auth_secret()),
+    UserSalt = couch_util:get_value(<<"salt">>, UserProps2),
+    CurrentTime = make_cookie_time(),
+    {Secret, UserSalt, CurrentTime}.
+
+% This endpoint exists to allow users with a server admin account to get an
+% authentication token for any other user. This is useful when a middleware
+% layer has access to CouchDB as an admin user and needs to give browsers an
+% access token that authenticates them against CouchDB.
+handle_delegated_session_req(Req) ->
+    handle_delegated_session_req(Req, couch_auth_cache).
+handle_delegated_session_req(#httpd{method='POST', path_parts=[_LoginAs, UserName]}=Req, AuthModule) ->
+    ok = couch_httpd:verify_is_server_admin(Req),
+    couch_httpd:validate_ctype(Req, "application/json"),
+    case AuthModule:get_user_creds(Req, UserName) of
+        nil -> couch_httpd:send_error(Req, not_found); % maybe send better error message
+        {ok, UserProps, AuthCtx} ->
+            Password = ?l2b(couch_util:get_value("password", UserProps, "")),
+            {Secret, UserSalt, CurrentTime} = prepare_cookie_values(Req, UserName, Password, UserProps, AuthModule, AuthCtx),
+            Cookie = make_cookie_hash(?b2l(UserName), <<Secret/binary, UserSalt/binary>>, CurrentTime),
+            % Cookie = make_cookie_token(Req, UserName, UserProps),
+            send_json(Req, {[{<<"auth_token">>, Cookie}]}) % handle Cookie value string foo
+    end;
+handle_delegated_session_req(#httpd{method='POST', path_parts=[_LoginAs]}=Req, _) ->
+    send_json(Req, 404, [], {[{<<"error">>, <<"missing username: /_login_as/username">>}]});
+handle_delegated_session_req(Req, _) ->
+    send_method_not_allowed(Req, "POST").
 
 % session handlers
 % Login handler with user db
@@ -308,12 +344,8 @@ handle_session_req(#httpd{method='POST', mochi_req=MochiReq}=Req, AuthModule) ->
     case authenticate(Password, UserProps) of
         true ->
             verify_totp(UserProps, Form),
-            UserProps2 = maybe_upgrade_password_hash(
-                Req, UserName, Password, UserProps, AuthModule, AuthCtx),
             % setup the session cookie
-            Secret = ?l2b(ensure_cookie_auth_secret()),
-            UserSalt = couch_util:get_value(<<"salt">>, UserProps2),
-            CurrentTime = make_cookie_time(),
+            {Secret, UserSalt, CurrentTime} = prepare_cookie_values(Req, UserName, Password, UserProps, AuthModule, AuthCtx),
             Cookie = cookie_auth_cookie(Req, ?b2l(UserName), <<Secret/binary, UserSalt/binary>>, CurrentTime),
             % TODO document the "next" feature in Futon
             {Code, Headers} = case couch_httpd:qs_value(Req, "next", nil) of
@@ -326,7 +358,7 @@ handle_session_req(#httpd{method='POST', mochi_req=MochiReq}=Req, AuthModule) ->
                 {[
                     {ok, true},
                     {name, UserName},
-                    {roles, couch_util:get_value(<<"roles">>, UserProps2, [])}
+                    {roles, couch_util:get_value(<<"roles">>, UserProps, [])}
                 ]});
         false ->
             authentication_warning(Req, UserName),
