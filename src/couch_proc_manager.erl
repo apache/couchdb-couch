@@ -253,7 +253,7 @@ handle_info({'EXIT', Pid, Reason}, State) ->
     case ets:lookup(?PROCS, Pid) of
         [#proc_int{} = Proc] ->
             NewState = remove_proc(State, Proc),
-            {noreply, flush_waiters(NewState, Proc#proc_int.lang)};
+            {noreply, NewState};
         [] ->
             {noreply, State}
     end;
@@ -436,9 +436,8 @@ assign_proc(#client{}=Client, #proc_int{client=undefined}=Proc) ->
     assign_proc(Pid, Proc).
 
 
-return_proc(#state{} = State, #proc_int{} = ProcInt) ->
-    #proc_int{pid = Pid, lang = Lang} = ProcInt,
-    NewState = case is_process_alive(Pid) of true ->
+return_proc(#state{} = State, #proc_int{pid = Pid} = ProcInt) ->
+    case is_process_alive(Pid) of true ->
         case ProcInt#proc_int.t0 < State#state.threshold_ts of
             true ->
                 remove_proc(State, ProcInt);
@@ -447,23 +446,12 @@ return_proc(#state{} = State, #proc_int{} = ProcInt) ->
                 true = ets:update_element(?PROCS, Pid, [
                     {#proc_int.client, undefined}
                 ]),
-                maybe_assign_proc(State, ProcInt)
+                State
         end;
     false ->
         remove_proc(State, ProcInt)
-    end,
-    flush_waiters(NewState, Lang).
-
-maybe_assign_proc(#state{} = State, ProcInt) ->
-    #proc_int{lang = Lang} = ProcInt,
-    case get_waiting_client(Lang) of
-        #client{from = From} = Client ->
-            Proc = assign_proc(Client, ProcInt#proc_int{client=undefined}),
-            gen_server:reply(From, {ok, Proc, State#state.config}),
-            State;
-        undefined ->
-            State
     end.
+
 
 remove_proc(State, #proc_int{}=Proc) ->
     ets:delete(?PROCS, Proc#proc_int.pid),
@@ -475,9 +463,10 @@ remove_proc(State, #proc_int{}=Proc) ->
     end,
     Counts = State#state.counts,
     Lang = Proc#proc_int.lang,
-    State#state{
+    NewState = State#state{
         counts = dict:update_counter(Lang, -1, Counts)
-    }.
+    },
+    flush_waiters(NewState, Lang).
 
 
 -spec export_proc(#proc_int{}) -> #proc{}.
