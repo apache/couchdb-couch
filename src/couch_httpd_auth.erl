@@ -223,13 +223,15 @@ cookie_authentication_handler(#httpd{mochi_req=MochiReq}=Req, AuthModule) ->
                     TimeStamp when CurrentTime < TimeStamp + Timeout ->
                         case couch_passwords:verify(ExpectedHash, Hash) of
                             true ->
-                                TimeLeft = TimeStamp + Timeout - CurrentTime,
                                 couch_log:debug("Successful cookie auth as: ~p",
                                                 [User]),
+                                TimeLeft = TimeStamp + Timeout - CurrentTime,
+                                IssueNewCookie = maybe_issue_new_cookie(
+                                    MochiReq, TimeLeft, Timeout),
                                 Req#httpd{user_ctx=#user_ctx{
                                     name=?l2b(User),
                                     roles=couch_util:get_value(<<"roles">>, UserProps, [])
-                                }, auth={FullSecret, TimeLeft < Timeout*0.9}};
+                                }, auth={FullSecret, IssueNewCookie}};
                             _Else ->
                                 Req
                         end;
@@ -240,13 +242,21 @@ cookie_authentication_handler(#httpd{mochi_req=MochiReq}=Req, AuthModule) ->
         end
     end.
 
+maybe_issue_new_cookie(MochiReq, TimeLeft, Timeout) ->
+    {VPath, _Query, _Fragment} = mochiweb_util:urlsplit_path(MochiReq:get(raw_path)),
+    case VPath of
+        "/_session" -> true;
+        _Else -> TimeLeft < Timeout*0.9
+    end.
+
 cookie_auth_header(#httpd{user_ctx=#user_ctx{name=null}}, _Headers) -> [];
 cookie_auth_header(#httpd{user_ctx=#user_ctx{name=User}, auth={Secret, true}}=Req, Headers) ->
     % Note: we only set the AuthSession cookie if:
     %  * a valid AuthSession cookie has been received
-    %  * we are outside a 10% timeout window
-    %  * and if an AuthSession cookie hasn't already been set e.g. by a login
-    %    or logout handler.
+    %  * if an AuthSession cookie hasn't already been set e.g. by a login
+    %    or logout handler
+    %  * either we are outside a 10% timeout window, or the client makes a
+    %    request to /_session to force cookie renewal
     % The login and logout handlers need to set the AuthSession cookie
     % themselves.
     CookieHeader = couch_util:get_value("Set-Cookie", Headers, ""),
