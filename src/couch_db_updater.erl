@@ -43,9 +43,7 @@ init({DbName, Filepath, Fd, Options}) ->
         ok = couch_file:write_header(Fd, Header),
         % delete any old compaction files that might be hanging around
         RootDir = config:get("couchdb", "database_dir", "."),
-        couch_file:delete(RootDir, Filepath ++ ".compact"),
-        couch_file:delete(RootDir, Filepath ++ ".compact.data"),
-        couch_file:delete(RootDir, Filepath ++ ".compact.meta");
+        delete_compact_files(RootDir, Filepath);
     false ->
         case couch_file:read_header(Fd) of
         {ok, Header} ->
@@ -55,9 +53,7 @@ init({DbName, Filepath, Fd, Options}) ->
             Header =  couch_db_header:new(),
             ok = couch_file:write_header(Fd, Header),
             % delete any old compaction files that might be hanging around
-            file:delete(Filepath ++ ".compact"),
-            file:delete(Filepath ++ ".compact.data"),
-            file:delete(Filepath ++ ".compact.meta")
+            purge_compact_files(Filepath)
         end
     end,
     Db = init_db(DbName, Filepath, Fd, Header, Options),
@@ -1454,3 +1450,13 @@ default_security_object(_DbName) ->
         "everyone" ->
             []
     end.
+
+delete_compact_files(RootDir, FullFilepath) ->
+    lists:foreach(fun(Ext) ->
+        couch_file:delete(RootDir, FullFilepath ++ Ext)
+    end, [".compact", ".compact.data", ".compact.meta"]).
+
+purge_compact_files(FullFilepath) ->
+    lists:foreach(fun(Ext) ->
+        file:delete(FullFilepath ++ Ext)
+    end, [".compact", ".compact.data", ".compact.meta"]).
