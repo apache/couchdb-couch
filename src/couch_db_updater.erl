@@ -18,6 +18,7 @@
 -export([btree_by_seq_split/1, btree_by_seq_join/2, btree_by_seq_reduce/2]).
 -export([make_doc_summary/2]).
 -export([init/1,terminate/2,handle_call/3,handle_cast/2,code_change/3,handle_info/2]).
+-export([delete_compact_files/2]).
 
 -include_lib("couch/include/couch_db.hrl").
 

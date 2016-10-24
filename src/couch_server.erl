@@ -455,10 +455,7 @@ handle_call({delete, DbName, Options}, _From, Server) ->
         %% Delete any leftover compaction files. If we don't do this a
         %% subsequent request for this DB will try to open them to use
         %% as a recovery.
-        lists:foreach(fun(Ext) ->
-            couch_file:delete(Server#server.root_dir, FullFilepath ++ Ext)
-        end, [".compact", ".compact.data", ".compact.meta"]),
-        couch_file:delete(Server#server.root_dir, FullFilepath ++ ".compact"),
+        couch_db_updater:delete_compact_files(Server#server.root_dir, FullFilepath),
 
         couch_db_plugin:on_delete(DbName, Options),
 
