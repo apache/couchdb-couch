@@ -74,3 +74,9 @@
 	  end)(Expect))).
 -endif.
 -define(_assertEquiv(Expect, Expr), ?_test(?assertEquiv(Expect, Expr))).
+
+-define(_assertEqualLists(A, B),
+    ?_assertEqual(lists:usort(A), lists:usort(B))).
+
+-define(assertEqualLists(A, B),
+    ?assertEqual(lists:usort(A), lists:usort(B))).
