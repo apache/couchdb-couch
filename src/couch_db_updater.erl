@@ -252,6 +252,7 @@ handle_cast({compact_done, CompactFilepath}, #db{filepath=Filepath}=Db) ->
         NewDb3 = refresh_validate_doc_funs(NewDb2),
         ok = gen_server:call(couch_server, {db_updated, NewDb3}, infinity),
         couch_event:notify(NewDb3#db.name, compacted),
+        file:delete(Filepath ++ ".compact.crash"),
         couch_log:info("Compaction for db \"~s\" completed.", [Db#db.name]),
         {noreply, NewDb3#db{compactor_pid=nil}};
     false ->
@@ -1201,16 +1202,30 @@ start_copy_compact(#db{}=Db) ->
     % and hope everything works out for the best.
     unlink(DFd),
 
-    NewDb1 = copy_purge_info(Db, NewDb),
-    NewDb2 = copy_compact(Db, NewDb1, Retry),
-    NewDb3 = sort_meta_data(NewDb2),
-    NewDb4 = commit_compaction_data(NewDb3),
-    NewDb5 = copy_meta_data(NewDb4),
-    NewDb6 = sync_header(NewDb5, db_to_header(NewDb5, NewDb5#db.header)),
-    close_db(NewDb6),
-
-    ok = couch_file:close(MFd),
-    gen_server:cast(Db#db.main_pid, {compact_done, DName}).
+    RootDir = config:get("couchdb", "database_dir", "."),
+    CrashFlagFile = Filepath ++ ".compact.crash",
+    try
+        NewDb1 = copy_purge_info(Db, NewDb),
+        NewDb2 = copy_compact(Db, NewDb1, Retry),
+        NewDb3 = sort_meta_data(NewDb2),
+        NewDb4 = commit_compaction_data(NewDb3),
+        NewDb5 = copy_meta_data(NewDb4),
+        NewDb6 = sync_header(NewDb5, db_to_header(NewDb5, NewDb5#db.header)),
+        close_db(NewDb6),
+        ok = couch_file:close(MFd),
+        gen_server:cast(Db#db.main_pid, {compact_done, DName}),
+        couch_file:delete(RootDir, CrashFlagFile)
+    catch
+        Class:Reason ->
+            case filelib:is_regular(CrashFlagFile) of
+                true ->
+                    delete_compact_files(RootDir, Filepath),
+                    exit({Class, Reason});
+                false ->
+                    file:write_file(CrashFlagFile, <<>>),
+                    exit({Class, Reason})
+            end
+    end.
 
 
 open_compaction_files(DbName, SrcHdr, DbFilePath, Options) ->
@@ -1455,9 +1470,9 @@ default_security_object(_DbName) ->
 delete_compact_files(RootDir, FullFilepath) ->
     lists:foreach(fun(Ext) ->
         couch_file:delete(RootDir, FullFilepath ++ Ext)
-    end, [".compact", ".compact.data", ".compact.meta"]).
+    end, [".compact", ".compact.data", ".compact.meta", ".compact.crash"]).
 
 purge_compact_files(FullFilepath) ->
     lists:foreach(fun(Ext) ->
         file:delete(FullFilepath ++ Ext)
-    end, [".compact", ".compact.data", ".compact.meta"]).
+    end, [".compact", ".compact.data", ".compact.meta", ".compact.crash"]).
