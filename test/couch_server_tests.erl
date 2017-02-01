@@ -32,8 +32,7 @@ setup(_) ->
     setup().
 
 teardown(Db) ->
-    (catch couch_db:close(Db)),
-    (catch file:delete(Db#db.filepath)).
+    (catch couch_db:close(Db)).
 
 teardown(rename, Db) ->
     config:set("couchdb", "enable_database_recovery", "false", false),
@@ -61,7 +60,9 @@ make_test_case(Mod, Funs) ->
         {foreachx, fun setup/1, fun teardown/2, [{Mod, Fun} || Fun <- Funs]}
     }.
 
-should_rename_on_delete(_, #db{filepath = Origin, name = DbName}) ->
+should_rename_on_delete(_, Db) ->
+    DbName = couch_db:name(Db),
+    Origin = couch_db:get_filepath(Db),
     ?_test(begin
         ?assert(filelib:is_regular(Origin)),
         ?assertMatch(ok, couch_server:delete(DbName, [])),
@@ -74,7 +75,9 @@ should_rename_on_delete(_, #db{filepath = Origin, name = DbName}) ->
         ?assert(filelib:is_regular(Renamed))
     end).
 
-should_delete(_, #db{filepath = Origin, name = DbName}) ->
+should_delete(_, Db) ->
+    DbName = couch_db:name(Db),
+    Origin = couch_db:get_filepath(Db),
     ?_test(begin
         ?assert(filelib:is_regular(Origin)),
         ?assertMatch(ok, couch_server:delete(DbName, [])),
