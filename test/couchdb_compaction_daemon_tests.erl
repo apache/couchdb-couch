@@ -182,7 +182,7 @@ update(DbName) ->
     lists:foreach(fun(_) ->
         Doc = couch_doc:from_json_obj({[{<<"_id">>, couch_uuids:new()}]}),
         {ok, _} = couch_db:update_docs(Db, [Doc]),
-        query_view(Db#db.name)
+        query_view(couch_db:name(Db))
     end, lists:seq(1, 200)),
     couch_db:close(Db).
 
