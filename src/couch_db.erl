@@ -19,6 +19,9 @@
     reopen/1,
     close/1,
 
+    incref/1,
+    decref/1,
+
     monitor/1,
     monitored_by/1,
     is_idle/1,
@@ -34,7 +37,9 @@
     get_db_info/1,
     get_doc_count/1,
     get_epochs/1,
+    get_instance_start_time/1,
     get_last_purged/1,
+    get_pid/1,
     get_revs_limit/1,
     get_security/1,
     get_update_seq/1,
@@ -46,6 +51,7 @@
     increment_update_seq/1,
     set_revs_limit/2,
     set_security/2,
+    set_user_ctx/2,
 
     ensure_full_commit/1,
     ensure_full_commit/2,
@@ -180,6 +186,14 @@ reopen(#db{main_pid = Pid, fd = Fd, fd_monitor = OldRef, user_ctx = UserCtx}) ->
         NewRef = erlang:monitor(process, NewFd),
         {ok, NewDb#db{user_ctx = UserCtx, fd_monitor = NewRef}}
     end.
+
+incref(#db{fd = Fd} = Db) ->
+    Ref = erlang:monitor(process, Fd),
+    {ok, Db#db{fd_monitor = Ref}}.
+
+decref(#db{fd_monitor = Monitor}) ->
+    erlang:demonitor(Monitor, [flush]),
+    ok.
 
 is_system_db(#db{options = Options}) ->
     lists:member(sys_db, Options).
@@ -381,6 +395,9 @@ get_last_purged(#db{}=Db) ->
             couch_file:pread_term(Db#db.fd, Pointer)
     end.
 
+get_pid(#db{main_pid = Pid}) ->
+    Pid.
+
 get_doc_count(Db) ->
     {ok, {Count, _, _}} = couch_btree:full_reduce(Db#db.id_tree),
     {ok, Count}.
@@ -392,6 +409,9 @@ get_epochs(#db{}=Db) ->
     Epochs = couch_db_header:epochs(Db#db.header),
     validate_epochs(Epochs),
     Epochs.
+
+get_instance_start_time(#db{instance_start_time = IST}) ->
+    IST.
 
 get_compacted_seq(#db{}=Db) ->
     couch_db_header:compacted_seq(Db#db.header).
@@ -584,6 +604,9 @@ set_security(#db{main_pid=Pid}=Db, {NewSecProps}) when is_list(NewSecProps) ->
     ok;
 set_security(_, _) ->
     throw(bad_request).
+
+set_user_ctx(#db{} = Db, UserCtx) ->
+    {ok, Db#db{user_ctx = UserCtx}}.
 
 validate_security_object(SecProps) ->
     Admins = couch_util:get_value(<<"admins">>, SecProps, {[]}),
