@@ -994,27 +994,18 @@ sync_header(Db, NewHeader) ->
         waiting_delayed_commit=nil
     }.
 
-copy_doc_attachments(#db{fd = SrcFd} = SrcDb, SrcSp, DestFd) ->
-    {ok, {BodyData, BinInfos0}} = couch_db:read_doc(SrcDb, SrcSp),
-    BinInfos = case BinInfos0 of
-    _ when is_binary(BinInfos0) ->
-        couch_compress:decompress(BinInfos0);
-    _ when is_list(BinInfos0) ->
-        % pre 1.2 file format
-        BinInfos0
-    end,
+copy_doc_attachments(#db{fd = SrcFd} = SrcDb, SrcSp, DestFd, Processed) ->
+    {BodyData, BinInfos} = read_doc_with_atts(SrcDb, SrcSp),
     % copy the bin values
-    NewBinInfos = lists:map(
-        fun({Name, Type, BinSp, AttLen, RevPos, ExpectedMd5}) ->
+    {NewBinInfos, NewProcessed} = lists:mapfoldr(
+        fun({Name, Type, BinSp, AttLen, RevPos, ExpectedMd5}, Dict) ->
             % 010 UPGRADE CODE
-            {NewBinSp, AttLen, AttLen, ActualMd5, _IdentityMd5} =
-                couch_stream:copy_to_new_stream(SrcFd, BinSp, DestFd),
-            check_md5(ExpectedMd5, ActualMd5),
-            {Name, Type, NewBinSp, AttLen, AttLen, RevPos, ExpectedMd5, identity};
-        ({Name, Type, BinSp, AttLen, DiskLen, RevPos, ExpectedMd5, Enc1}) ->
-            {NewBinSp, AttLen, _, ActualMd5, _IdentityMd5} =
-                couch_stream:copy_to_new_stream(SrcFd, BinSp, DestFd),
-            check_md5(ExpectedMd5, ActualMd5),
+            {{NewBinSp, AttLen}, NewDict} =
+                maybe_copy_att_data(ExpectedMd5, SrcFd, BinSp, DestFd, Dict),
+            {{Name, Type, NewBinSp, AttLen, AttLen, RevPos, ExpectedMd5, identity}, NewDict};
+        ({Name, Type, BinSp, AttLen, DiskLen, RevPos, ExpectedMd5, Enc1}, Dict) ->
+            {{NewBinSp, AttLen}, NewDict} =
+                maybe_copy_att_data(ExpectedMd5, SrcFd, BinSp, DestFd, Dict),
             Enc = case Enc1 of
             true ->
                 % 0110 UPGRADE CODE
@@ -1025,9 +1016,31 @@ copy_doc_attachments(#db{fd = SrcFd} = SrcDb, SrcSp, DestFd) ->
             _ ->
                 Enc1
             end,
-            {Name, Type, NewBinSp, AttLen, DiskLen, RevPos, ExpectedMd5, Enc}
-        end, BinInfos),
-    {BodyData, NewBinInfos}.
+            {{Name, Type, NewBinSp, AttLen, DiskLen, RevPos, ExpectedMd5, Enc}, NewDict}
+        end, Processed, BinInfos),
+    {BodyData, NewBinInfos, NewProcessed}.
+
+maybe_copy_att_data(ExpectedMd5, SrcFd, BinSp, DestFd, Processed) ->
+    case dict:find(ExpectedMd5, Processed) of
+        error ->
+            {NewBinSp, AttLen, _, ActualMd5, _IdentityMd5} =
+                couch_stream:copy_to_new_stream(SrcFd, BinSp, DestFd),
+            check_md5(ExpectedMd5, ActualMd5),
+            Value = {NewBinSp, AttLen},
+            {Value, dict:store(ExpectedMd5, Value, Processed)};
+        {ok, Value} ->
+            {Value, Processed}
+    end.
+
+read_doc_with_atts(SrcDb, SrcSp) ->
+    {ok, {BodyData, BinInfos0}} = couch_db:read_doc(SrcDb, SrcSp),
+    BinInfos = if is_binary(BinInfos0) ->
+        couch_compress:decompress(BinInfos0);
+    true ->
+        % pre 1.2 file format
+        BinInfos0
+    end,
+    {BodyData, BinInfos}.
 
 merge_lookups(Infos, []) ->
     Infos;
@@ -1053,10 +1066,11 @@ copy_docs(Db, #db{fd = DestFd} = NewDb, MixedInfos, Retry) ->
         A =< B
     end, merge_lookups(MixedInfos, LookupResults)),
 
-    NewInfos1 = lists:map(fun(Info) ->
-        {NewRevTree, FinalAcc} = couch_key_tree:mapfold(fun
-            (_Rev, #leaf{ptr=Sp}=Leaf, leaf, SizesAcc) ->
-                {Body, AttInfos} = copy_doc_attachments(Db, Sp, DestFd),
+    {NewInfos1, _} = lists:mapfoldl(fun(Info, Acc) ->
+        {NewRevTree, {FinalAcc, D}} = couch_key_tree:mapfold(fun
+            (_Rev, #leaf{ptr=Sp}=Leaf, leaf, {SizesAcc, Processed}) ->
+                {Body, AttInfos, NewProcessed} =
+                    copy_doc_attachments(Db, Sp, DestFd, Processed),
                 SummaryChunk = make_doc_summary(NewDb, {Body, AttInfos}),
                 ExternalSize = ?term_size(SummaryChunk),
                 {ok, Pos, SummarySize} = couch_file:append_raw_chunk(
@@ -1070,22 +1084,22 @@ copy_docs(Db, #db{fd = DestFd} = NewDb, MixedInfos, Retry) ->
                     },
                     atts = AttSizes
                 },
-                {NewLeaf, add_sizes(leaf, NewLeaf, SizesAcc)};
-            (_Rev, _Leaf, branch, SizesAcc) ->
-                {?REV_MISSING, SizesAcc}
-        end, {0, 0, []}, Info#full_doc_info.rev_tree),
+                {NewLeaf, {add_sizes(leaf, NewLeaf, SizesAcc), NewProcessed}};
+            (_Rev, _Leaf, branch, {SizesAcc, Processed}) ->
+                {?REV_MISSING, {SizesAcc, Processed}}
+        end, {{0, 0, []}, Acc}, Info#full_doc_info.rev_tree),
         {FinalAS, FinalES, FinalAtts} = FinalAcc,
         TotalAttSize = lists:foldl(fun({_, S}, A) -> S + A end, 0, FinalAtts),
         NewActiveSize = FinalAS + TotalAttSize,
         NewExternalSize = FinalES + TotalAttSize,
-        Info#full_doc_info{
+        {Info#full_doc_info{
             rev_tree = NewRevTree,
             sizes = #size_info{
                 active = NewActiveSize,
                 external = NewExternalSize
             }
-        }
-    end, NewInfos0),
+        }, D}
+    end, dict:new(), NewInfos0),
 
     NewInfos = stem_full_doc_infos(Db, NewInfos1),
     RemoveSeqs =
