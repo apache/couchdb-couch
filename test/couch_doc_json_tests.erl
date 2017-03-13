@@ -38,6 +38,8 @@ mock(couch_log) ->
     ok;
 mock(config) ->
     meck:new(config, [passthrough]),
+    meck:expect(config, get_integer,
+        fun("couchdb", "max_document_size", 4294967296) -> 1024 end),
     meck:expect(config, get, fun(_, _) -> undefined end),
     meck:expect(config, get, fun(_, _, Default) -> Default end),
     ok.
@@ -230,10 +232,23 @@ from_json_error_cases() ->
             {[{<<"_something">>, 5}]},
             {doc_validation, <<"Bad special document member: _something">>},
             "Underscore prefix fields are reserved."
+        },
+        {
+            fun() ->
+                {[
+                    {<<"_id">>, <<"large_doc">>},
+                    {<<"x">> , << <<"x">> || _ <- lists:seq(1,1025) >>}
+                ]}
+            end,
+            {request_entity_too_large, <<"large_doc">>},
+            "Document too large."
         }
     ],
 
     lists:map(fun
+        ({Fun, Expect, Msg}) when is_function(Fun, 0) ->
+            Error = (catch couch_doc:from_json_obj(Fun())),
+            {Msg, ?_assertMatch(Expect, Error)};
         ({EJson, Expect, Msg}) ->
             Error = (catch couch_doc:from_json_obj(EJson)),
             {Msg, ?_assertMatch(Expect, Error)};

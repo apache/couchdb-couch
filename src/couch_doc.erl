@@ -125,7 +125,14 @@ doc_to_json_obj(#doc{id=Id,deleted=Del,body=Body,revs={Start, RevIds},
     }.
 
 from_json_obj({Props}) ->
-    transfer_fields(Props, #doc{body=[]});
+    Doc = transfer_fields(Props, #doc{body=[]}),
+    MaxSize = config:get_integer("couchdb", "max_document_size", 4294967296),
+    case erlang:external_size(Doc#doc.body) =< MaxSize of
+        true ->
+            Doc;
+        false ->
+            throw({request_entity_too_large, Doc#doc.id})
+    end;
 
 from_json_obj(_Other) ->
     throw({bad_request, "Document must be a JSON object"}).
