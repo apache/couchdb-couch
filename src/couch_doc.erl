@@ -424,7 +424,7 @@ doc_from_multi_part_stream(ContentType, DataFun, Ref) ->
     {{started_open_doc_revs, NewRef}, Parser, _ParserRef} ->
         restart_open_doc_revs(Parser, Ref, NewRef);
     {{doc_bytes, Ref, DocBytes}, Parser, ParserRef} ->
-        Doc = from_json_obj(?JSON_DECODE(DocBytes)),
+        Doc = from_json_obj_validate(?JSON_DECODE(DocBytes)),
         erlang:put(mochiweb_request_recv, true),
         % we'll send the Parser process ID to the remote nodes so they can
         % retrieve their own copies of the attachment data
