@@ -167,7 +167,7 @@ from_json_success_cases() ->
     ],
     lists:map(
         fun({EJson, Expect, Msg}) ->
-            {Msg, ?_assertMatch(Expect, couch_doc:from_json_obj(EJson))}
+            {Msg, ?_assertMatch(Expect, couch_doc:from_json_obj_validate(EJson))}
         end,
         Cases).
 
@@ -247,14 +247,14 @@ from_json_error_cases() ->
 
     lists:map(fun
         ({Fun, Expect, Msg}) when is_function(Fun, 0) ->
-            Error = (catch couch_doc:from_json_obj(Fun())),
+            Error = (catch couch_doc:from_json_obj_validate(Fun())),
             {Msg, ?_assertMatch(Expect, Error)};
         ({EJson, Expect, Msg}) ->
-            Error = (catch couch_doc:from_json_obj(EJson)),
+            Error = (catch couch_doc:from_json_obj_validate(EJson)),
             {Msg, ?_assertMatch(Expect, Error)};
         ({EJson, Msg}) ->
             try
-                couch_doc:from_json_obj(EJson),
+                couch_doc:from_json_obj_validate(EJson),
                 {"Conversion failed to raise an exception", ?_assert(false)}
             catch
                 _:_ -> {Msg, ?_assert(true)}
