@@ -860,7 +860,7 @@ prep_and_validate_replicated_updates(Db, [Bucket|RestBuckets], [OldInfo|RestOldI
 
 
 
-new_revid(#doc{body=Body0, revs={OldStart,OldRevs}, atts=Atts, deleted=Deleted}) ->
+new_revid(#doc{body=Body0, revs={OldStart,OldRevs}, atts=Atts, deleted=Deleted, meta=Meta}) ->
     DigestedAtts = lists:foldl(fun(Att, Acc) ->
         [N, T, M] = couch_att:fetch([name, type, md5], Att),
         case M == <<>> of
@@ -883,7 +883,8 @@ new_revid(#doc{body=Body0, revs={OldStart,OldRevs}, atts=Atts, deleted=Deleted})
             % We must have old style non-md5 attachments
             ?l2b(integer_to_list(couch_util:rand32()));
         Atts2 ->
-            OldRev = case OldRevs of [] -> 0; [OldRev0|_] -> OldRev0 end,
+            Rnd = couch_util:get_value(rnd, Meta),
+            OldRev = case OldRevs of [] -> Rnd; [OldRev0|_] -> OldRev0 end,
             couch_crypto:hash(md5, term_to_binary([Deleted, OldStart, OldRev, Body, Atts2], [{minor_version, 1}]))
     end.
 
