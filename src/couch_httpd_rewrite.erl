@@ -271,8 +271,11 @@ replace_var(Value, _Bindings, _Formats) when is_binary(Value) ->
     Value;
 replace_var(Value, Bindings, Formats) when is_list(Value) ->
     lists:reverse(lists:foldl(fun
-                (<<":", Var/binary>>=Value1, Acc) ->
-                    [get_var(Var, Bindings, Value1, Formats)|Acc];
+                (<<":", Var/binary>>, Acc) ->
+                    case get_var(Var, Bindings, undefined, Formats) of 
+                         undefined -> [''|Acc] ;
+                         DefinedValue -> [DefinedValue|Acc]
+                    end;
                 (Value1, Acc) ->
                     [Value1|Acc]
             end, [], Value));
