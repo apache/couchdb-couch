@@ -270,6 +270,9 @@ transfer_fields([{<<"_replication_state">>, _} = Field | Rest],
 transfer_fields([{<<"_replication_state_time">>, _} = Field | Rest],
     #doc{body=Fields} = Doc) ->
     transfer_fields(Rest, Doc#doc{body=[Field|Fields]});
+transfer_fields([{<<"_replication_start_time">>, _} = Field | Rest],
+    #doc{body=Fields} = Doc) ->
+    transfer_fields(Rest, Doc#doc{body=[Field|Fields]});
 transfer_fields([{<<"_replication_state_reason">>, _} = Field | Rest],
     #doc{body=Fields} = Doc) ->
     transfer_fields(Rest, Doc#doc{body=[Field|Fields]});
