@@ -528,6 +528,10 @@ id_tree_join(Id, {HighSeq, Deleted, Sizes, DiskTree}) ->
 
 id_tree_reduce(reduce, FullDocInfos) ->
     lists:foldl(fun(Info, {NotDeleted, Deleted, Sizes}) ->
+        if is_record(Info, full_doc_info) -> ok; true ->
+            {_, Stack} = erlang:process_info(self(), current_stacktrace),
+            erlang:error({invalid_fdi, Info, Stack})
+        end,
         Sizes2 = reduce_sizes(Sizes, Info#full_doc_info.sizes),
         case Info#full_doc_info.deleted of
         true ->
