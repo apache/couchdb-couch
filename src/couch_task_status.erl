@@ -28,6 +28,7 @@
 -export([start_link/0, stop/0]).
 -export([all/0, add_task/1, update/1, get/1, set_update_frequency/1]).
 -export([is_task_added/0]).
+-export([filter/2]).
 
 -export([init/1, terminate/2, code_change/3]).
 -export([handle_call/3, handle_cast/2, handle_info/2]).
@@ -47,6 +48,10 @@ stop() ->
 
 all() ->
     gen_server:call(?MODULE, all).
+
+
+filter(Key, Value) ->
+    gen_server:call(?MODULE, {filter, Key, Value}).
 
 
 add_task(Props) ->
@@ -122,6 +127,14 @@ handle_call({add_task, TaskProps}, {From, _}, Server) ->
     [_] ->
         {reply, {add_task_error, already_registered}, Server}
     end;
+handle_call({filter, Key, Value}, _, Server) ->
+    All = [
+        [{pid, ?l2b(pid_to_list(Pid))} | TaskProps]
+        ||
+        {Pid, TaskProps} <- ets:tab2list(?MODULE),
+        filter_task(Key, Value, TaskProps)
+    ],
+    {reply, All, Server};
 handle_call(all, _, Server) ->
     All = [
         [{pid, ?l2b(pid_to_list(Pid))} | TaskProps]
@@ -130,6 +143,12 @@ handle_call(all, _, Server) ->
     ],
     {reply, All, Server}.
 
+filter_task(Key, Value, TaskProps) ->
+    Key1 = couch_util:to_list(Key),
+    Value1 = couch_util:to_list(Value),
+    TaskProps1 = [{couch_util:to_list(K), couch_util:to_list(V)}
+        || {K, V} <- TaskProps],
+    couch_util:get_value(Key1, TaskProps1) =:= Value1.
 
 handle_cast({update_status, Pid, NewProps}, Server) ->
     case ets:lookup(?MODULE, Pid) of
