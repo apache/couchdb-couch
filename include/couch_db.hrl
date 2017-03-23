@@ -238,3 +238,8 @@
 -type sec_props() :: [tuple()].
 -type sec_obj() :: {sec_props()}.
 
+-define(record_to_keyval(Name, Record),
+    lists:zip(record_info(fields, Name), tl(tuple_to_list(Record)))).
+
+-define(from_record(Name, Record, Keys),
+    element(1, couch_util:take_kv_values(?record_to_keyval(Name, Record), Keys))).

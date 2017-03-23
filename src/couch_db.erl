@@ -36,6 +36,7 @@
 -export([normalize_dbname/1]).
 -export([validate_dbname/1]).
 -export([dbname_suffix/1]).
+-export([format_db_record/1]).
 
 -include_lib("couch/include/couch_db.hrl").
 
@@ -1562,6 +1563,30 @@ is_systemdb(DbName) when is_list(DbName) ->
 is_systemdb(DbName) when is_binary(DbName) ->
     lists:member(dbname_suffix(DbName), ?SYSTEM_DATABASES).
 
+format_db_record(#db{} = Db) ->
+    ?from_record(db, Db, [
+        main_pid,
+        compactor_pid,
+        instance_start_time,
+        fd,
+        fd_monitor,
+        committed_update_seq,
+        update_seq,
+        name,
+        filepath,
+        validate_doc_funs,
+        security,
+        security_ptr,
+        user_ctx,
+        waiting_delayed_commit,
+        revs_limit,
+        fsync_options,
+        options,
+        compression,
+        before_doc_update,
+        after_doc_read
+    ]).
+
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
@@ -1657,5 +1682,30 @@ add_shard(DbName) ->
 
 generate_cases(DbName) ->
     [{DbName, DbName}, {DbName, ?l2b(DbName)}].
+
+format_db_record_test() ->
+    Db = list_to_tuple([db | record_info(fields, db)]),
+    ?assertEqual([
+        {main_pid, main_pid},
+        {compactor_pid, compactor_pid},
+        {instance_start_time, instance_start_time},
+        {fd, fd},
+        {fd_monitor, fd_monitor},
+        {committed_update_seq, committed_update_seq},
+        {update_seq, update_seq},
+        {name, name},
+        {filepath, filepath},
+        {validate_doc_funs, validate_doc_funs},
+        {security, security},
+        {security_ptr, security_ptr},
+        {user_ctx, user_ctx},
+        {waiting_delayed_commit, waiting_delayed_commit},
+        {revs_limit, revs_limit},
+        {fsync_options, fsync_options},
+        {options, options},
+        {compression, compression},
+        {before_doc_update, before_doc_update},
+        {after_doc_read, after_doc_read}
+    ], format_db_record(Db)).
 
 -endif.

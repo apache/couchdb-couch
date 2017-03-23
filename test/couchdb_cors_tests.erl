@@ -19,12 +19,6 @@
 
 -define(TIMEOUT, 1000).
 
--define(_assertEqualLists(A, B),
-    ?_assertEqual(lists:usort(A), lists:usort(B))).
-
--define(assertEqualLists(A, B),
-    ?assertEqual(lists:usort(A), lists:usort(B))).
-
 start() ->
     Ctx = test_util:start_couch([ioq]),
     ok = config:set("httpd", "enable_cors", "true", false),

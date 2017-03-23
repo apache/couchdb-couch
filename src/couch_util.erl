@@ -33,6 +33,7 @@
 -export([find_in_binary/2]).
 -export([callback_exists/3, validate_callback_exists/3]).
 -export([with_proc/4]).
+-export([take_kv_values/2]).
 
 -include_lib("couch/include/couch_db.hrl").
 
@@ -598,3 +599,14 @@ with_proc(M, F, A, Timeout) ->
         erlang:demonitor(Ref, [flush]),
         {error, timeout}
     end.
+
+
+take_kv_values(List, Keys) ->
+    lists:foldr(fun(Key, {Acc, KVList}) ->
+        case lists:keytake(Key, 1, KVList) of
+            {value, {Key, _V} = KV, Rest} ->
+                {[KV | Acc], Rest};
+            false ->
+                {Acc, KVList}
+        end
+    end, {[], List}, Keys).
