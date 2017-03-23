@@ -1,5 +1,6 @@
 *.o
 *.so
+*.d
 ebin/
 
 priv/couch_js/config.h
