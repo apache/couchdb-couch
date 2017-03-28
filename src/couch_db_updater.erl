@@ -1416,31 +1416,16 @@ copy_meta_data(#db{fd=Fd, header=Header}=Db, DocCount) ->
         rem_seqs=[],
         infos=[]
     },
-    Acc = merge_docids(Iter, Acc0),
-    {ok, IdTree} = couch_btree:add(Acc#merge_st.id_tree, Acc#merge_st.infos),
-    {ok, SeqTree} = couch_btree:add_remove(
-        Acc#merge_st.seq_tree, [], Acc#merge_st.rem_seqs
-    ),
-    update_compact_task(length(Acc#merge_st.infos)),
+    Acc1 = merge_docids(Iter, Acc0),
+    #merge_st{
+        id_tree = IdTree,
+        seq_tree = SeqTree
+    } = flush_merge_st(Acc1),
     Db#db{id_tree=IdTree, seq_tree=SeqTree}.
 
 
 merge_docids(Iter, #merge_st{infos=Infos}=Acc) when length(Infos) > 1000 ->
-    #merge_st{
-        id_tree=IdTree0,
-        seq_tree=SeqTree0,
-        rem_seqs=RemSeqs
-    } = Acc,
-    {ok, IdTree1} = couch_btree:add(IdTree0, Infos),
-    {ok, SeqTree1} = couch_btree:add_remove(SeqTree0, [], RemSeqs),
-    update_compact_task(length(Infos)),
-    Acc1 = Acc#merge_st{
-        id_tree=IdTree1,
-        seq_tree=SeqTree1,
-        rem_seqs=[],
-        infos=[]
-    },
-    merge_docids(Iter, Acc1);
+    merge_docids(Iter, flush_merge_st(Acc));
 merge_docids(Iter, #merge_st{curr=Curr}=Acc) ->
     case next_info(Iter, Curr, []) of
         {NextIter, NewCurr, FDI, Seqs} ->
@@ -1477,6 +1462,24 @@ next_info(Iter, {Id, Seq, FDI}, Seqs) ->
         finished ->
             {finished, FDI, Seqs}
     end.
+
+
+flush_merge_st(MergeSt) ->
+    #merge_st{
+        id_tree=IdTree0,
+        seq_tree=SeqTree0,
+        infos=Infos,
+        rem_seqs=RemSeqs
+    } = MergeSt,
+    {ok, IdTree1} = couch_btree:add(IdTree0, Infos),
+    {ok, SeqTree1} = couch_btree:add_remove(SeqTree0, [], RemSeqs),
+    update_compact_task(length(Infos)),
+    MergeSt#merge_st{
+        id_tree=IdTree1,
+        seq_tree=SeqTree1,
+        infos=[],
+        rem_seqs=[]
+    }.
 
 
 update_compact_task(NumChanges) ->
