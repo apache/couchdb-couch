@@ -27,6 +27,7 @@
 }).
 
 -record(merge_st, {
+    fd,
     id_tree,
     seq_tree,
     curr,
@@ -1097,15 +1098,21 @@ copy_docs(Db, #db{fd = DestFd} = NewDb, MixedInfos, Retry) ->
         [Seq || {ok, #full_doc_info{update_seq=Seq}} <- Existing]
     end,
 
+    {ok, IdEms} = update_emsort(NewDb, NewInfos),
     {ok, SeqTree} = couch_btree:add_remove(
             NewDb#db.seq_tree, NewInfos, RemoveSeqs),
 
-    FDIKVs = lists:map(fun(#full_doc_info{id=Id, update_seq=Seq}=FDI) ->
-        {{Id, Seq}, FDI}
-    end, NewInfos),
-    {ok, IdEms} = couch_emsort:add(NewDb#db.id_tree, FDIKVs),
     update_compact_task(length(NewInfos)),
     NewDb#db{id_tree=IdEms, seq_tree=SeqTree}.
+
+
+update_emsort(#db{id_tree=IdTree}, FDIs) ->
+    Fd = couch_emsort:get_fd(IdTree),
+    {ok, PosSizePairs} = couch_file:append_terms(Fd, FDIs),
+    KVs = lists:zipwith(fun(#full_doc_info{id=Id, update_seq=Seq}, {Pos, _}) ->
+        {{Id, Seq}, Pos}
+    end, FDIs, PosSizePairs),
+    couch_emsort:add(IdTree, KVs).
 
 
 copy_compact(Db, NewDb0, Retry) ->
@@ -1411,6 +1418,7 @@ copy_meta_data(#db{fd=Fd, header=Header}=Db, DocCount) ->
     ]),
     {ok, Iter} = couch_emsort:iter(Src),
     Acc0 = #merge_st{
+        fd=couch_emsort:get_fd(Src),
         id_tree=IdTree0,
         seq_tree=Db#db.seq_tree,
         rem_seqs=[],
@@ -1466,11 +1474,13 @@ next_info(Iter, {Id, Seq, FDI}, Seqs) ->
 
 flush_merge_st(MergeSt) ->
     #merge_st{
+        fd=Fd,
         id_tree=IdTree0,
         seq_tree=SeqTree0,
-        infos=Infos,
+        infos=PosList,
         rem_seqs=RemSeqs
     } = MergeSt,
+    {ok, Infos} = couch_file:mpread_terms(Fd, PosList),
     {ok, IdTree1} = couch_btree:add(IdTree0, Infos),
     {ok, SeqTree1} = couch_btree:add_remove(SeqTree0, [], RemSeqs),
     update_compact_task(length(Infos)),
