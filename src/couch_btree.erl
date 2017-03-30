@@ -427,17 +427,14 @@ write_node(#btree{fd = Fd, compression = Comp} = Bt, NodeType, NodeList) ->
     % split up nodes into smaller sizes
     NodeListList = chunkify(NodeList),
     % now write out each chunk and return the KeyPointer pairs for those nodes
-    ResultList = [
-        begin
-            {ok, Pointer, Size} = couch_file:append_term(
-                Fd, {NodeType, ANodeList}, [{compression, Comp}]),
-            {LastKey, _} = lists:last(ANodeList),
-            SubTreeSize = reduce_tree_size(NodeType, Size, ANodeList),
-            {LastKey, {Pointer, reduce_node(Bt, NodeType, ANodeList), SubTreeSize}}
-        end
-    ||
-        ANodeList <- NodeListList
-    ],
+    ToWrite = [{NodeType, ANodeList} || ANodeList <- NodeListList],
+    WriteOpts = [{compression, Comp}],
+    {ok, PointerSizePairs} = couch_file:append_terms(Fd, ToWrite, WriteOpts),
+    ResultList = lists:zipwith(fun(ANodeList, {Pointer, Size}) ->
+        {LastKey, _} = lists:last(ANodeList),
+        SubTreeSize = reduce_tree_size(NodeType, Size, ANodeList),
+        {LastKey, {Pointer, reduce_node(Bt, NodeType, ANodeList), SubTreeSize}}
+    end, NodeListList, PointerSizePairs),
     {ok, ResultList}.
 
 modify_kpnode(Bt, {}, _LowerBound, Actions, [], QueryOutput) ->
