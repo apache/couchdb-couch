@@ -34,6 +34,8 @@
     infos
 }).
 
+-define(COMP_DOCID_BATCH_SIZE, 1000).
+
 init({DbName, Filepath, Fd, Options}) ->
     erlang:put(io_priority, {db_update, DbName}),
     case lists:member(create, Options) of
@@ -1108,10 +1110,10 @@ copy_docs(Db, #db{fd = DestFd} = NewDb, MixedInfos, Retry) ->
     NewDb#db{id_tree=IdEms, seq_tree=SeqTree}.
 
 
-copy_compact(Db, NewDb0, Retry) ->
+copy_compact(Db, NewDb0, Retry, TotalChanges) ->
     Compression = couch_compress:get_compression_method(),
     NewDb = NewDb0#db{compression=Compression},
-    TotalChanges = couch_db:count_changes_since(Db, NewDb#db.update_seq),
+
     BufferSize = list_to_integer(
         config:get("database_compaction", "doc_buffer_size", "524288")),
     CheckpointAfter = couch_util:to_integer(
@@ -1147,6 +1149,7 @@ copy_compact(Db, NewDb0, Retry) ->
     TaskProps0 = [
         {type, database_compaction},
         {database, Db#db.name},
+        {phase, seq_tree},
         {progress, 0},
         {changes_done, 0},
         {total_changes, TotalChanges}
@@ -1193,6 +1196,8 @@ start_copy_compact(#db{}=Db) ->
         open_compaction_files(Name, Header, Filepath, Options),
     erlang:monitor(process, MFd),
 
+    TotalChanges = couch_db:count_changes_since(Db, NewDb#db.update_seq),
+
     % This is a bit worrisome. init_db/4 will monitor the data fd
     % but it doesn't know about the meta fd. For now I'll maintain
     % that the data fd is the old normal fd and meta fd is special
@@ -1200,10 +1205,10 @@ start_copy_compact(#db{}=Db) ->
     unlink(DFd),
 
     NewDb1 = copy_purge_info(Db, NewDb),
-    NewDb2 = copy_compact(Db, NewDb1, Retry),
-    NewDb3 = sort_meta_data(NewDb2),
+    NewDb2 = copy_compact(Db, NewDb1, Retry, TotalChanges),
+    NewDb3 = sort_meta_data(NewDb2, TotalChanges),
     NewDb4 = commit_compaction_data(NewDb3),
-    NewDb5 = copy_meta_data(NewDb4),
+    NewDb5 = copy_meta_data(NewDb4, TotalChanges),
     NewDb6 = sync_header(NewDb5, db_to_header(NewDb5, NewDb5#db.header)),
     close_db(NewDb6),
 
@@ -1323,12 +1328,84 @@ bind_id_tree(Db, Fd, State) ->
     Db#db{id_tree=IdBtree}.
 
 
-sort_meta_data(Db0) ->
-    {ok, Ems} = couch_emsort:merge(Db0#db.id_tree),
-    Db0#db{id_tree=Ems}.
+sort_meta_data(Db0, TotalChanges) ->
+    couch_task_status:update([
+        {phase, sort_ids_init},
+        {total_changes, TotalChanges},
+        {changes_done, 0},
+        {progress, 0}
+    ]),
+    Ems0 = Db0#db.id_tree,
+    Options = [
+        {event_cb, fun emsort_cb/3},
+        {event_st, {init, 0, 0}}
+    ],
+    Ems1 = couch_emsort:set_options(Ems0, Options),
+    {ok, Ems2} = couch_emsort:merge(Ems1),
+    Db0#db{id_tree=Ems2}.
 
 
-copy_meta_data(#db{fd=Fd, header=Header}=Db) ->
+emsort_cb(_Ems, {merge, chain}, {init, Copied, Nodes}) ->
+    {init, Copied, Nodes + 1};
+emsort_cb(_Ems, row_copy, {init, Copied, Nodes})
+        when Copied >= ?COMP_DOCID_BATCH_SIZE ->
+    update_compact_task(Copied + 1),
+    {init, 0, Nodes};
+emsort_cb(_Ems, row_copy, {init, Copied, Nodes}) ->
+    {init, Copied + 1, Nodes};
+emsort_cb(Ems, {merge_start, reverse}, {init, Copied, Nodes}) ->
+    BBChunkSize = couch_emsort:get_bb_chunk_size(Ems),
+
+    % Subtract one because we already finished the first
+    % iteration when we were counting the number of nodes
+    % in the backbone.
+    Iters = calculate_sort_iters(Nodes, BBChunkSize, 0) - 1,
+
+    % Compaction retries mean we may have copied more than
+    % doc count rows. This accounts for that by using the
+    % number we've actually copied.
+    [PrevCopied] = couch_task_status:get([changes_done]),
+    TotalCopied = PrevCopied + Copied,
+
+    couch_task_status:update([
+        {phase, sort_ids},
+        {total_changes, Iters * TotalCopied},
+        {changes_done, 0},
+        {progress, 0}
+    ]),
+    0;
+
+emsort_cb(_Ems, row_copy, Copied)
+        when is_integer(Copied), Copied > ?COMP_DOCID_BATCH_SIZE ->
+    update_compact_task(Copied + 1),
+    0;
+
+emsort_cb(_Ems, row_copy, Copied) when is_integer(Copied) ->
+    Copied + 1;
+
+emsort_cb(_Ems, _Event, St) ->
+    St.
+
+
+calculate_sort_iters(Nodes, BBChunk, Count) when Nodes < BBChunk ->
+    Count;
+calculate_sort_iters(Nodes0, BBChunk, Count) when BBChunk > 1 ->
+    Calc = fun(N0) ->
+        N1 = N0 div BBChunk,
+        N1 + if N1 rem BBChunk == 0 -> 0; true -> 1 end
+    end,
+    Nodes1 = Calc(Nodes0),
+    Nodes2 = Calc(Nodes1),
+    calculate_sort_iters(Nodes2, BBChunk, Count + 2).
+
+
+copy_meta_data(#db{fd=Fd, header=Header}=Db, TotalChanges) ->
+    couch_task_status:update([
+        {phase, copy_ids},
+        {changes_done, 0},
+        {total_changes, TotalChanges},
+        {progress, 0}
+    ]),
     Src = Db#db.id_tree,
     DstState = couch_db_header:id_tree_state(Header),
     {ok, IdTree0} = couch_btree:open(DstState, Fd, [
@@ -1348,6 +1425,7 @@ copy_meta_data(#db{fd=Fd, header=Header}=Db) ->
     {ok, SeqTree} = couch_btree:add_remove(
         Acc#merge_st.seq_tree, [], Acc#merge_st.rem_seqs
     ),
+    update_compact_task(length(Acc#merge_st.infos)),
     Db#db{id_tree=IdTree, seq_tree=SeqTree}.
 
 
@@ -1359,6 +1437,7 @@ merge_docids(Iter, #merge_st{infos=Infos}=Acc) when length(Infos) > 1000 ->
     } = Acc,
     {ok, IdTree1} = couch_btree:add(IdTree0, Infos),
     {ok, SeqTree1} = couch_btree:add_remove(SeqTree0, [], RemSeqs),
+    update_compact_task(length(Infos)),
     Acc1 = Acc#merge_st{
         id_tree=IdTree1,
         seq_tree=SeqTree1,

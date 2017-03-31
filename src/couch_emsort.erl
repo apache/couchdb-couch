@@ -129,7 +129,8 @@
 %     CA3                  CD3
 %
 
--export([open/1, open/2, get_fd/1, get_state/1]).
+-export([open/1, open/2, set_options/2, get_fd/1, get_state/1]).
+-export([get_bb_chunk_size/1]).
 -export([add/2, merge/1, sort/1, iter/1, next/1]).
 
 
@@ -137,7 +138,9 @@
     fd,
     root,
     bb_chunk = 10,
-    chain_chunk = 100
+    chain_chunk = 100,
+    event_cb,
+    event_st
 }).
 
 
@@ -156,7 +159,11 @@ set_options(Ems, [{root, Root} | Rest]) ->
 set_options(Ems, [{chain_chunk, Count} | Rest]) when is_integer(Count) ->
     set_options(Ems#ems{chain_chunk=Count}, Rest);
 set_options(Ems, [{back_bone_chunk, Count} | Rest]) when is_integer(Count) ->
-    set_options(Ems#ems{bb_chunk=Count}, Rest).
+    set_options(Ems#ems{bb_chunk=Count}, Rest);
+set_options(Ems, [{event_cb, EventCB} | Rest]) when is_function(EventCB, 3) ->
+    set_options(Ems#ems{event_cb=EventCB}, Rest);
+set_options(Ems, [{event_st, EventSt} | Rest]) ->
+    set_options(Ems#ems{event_st=EventSt}, Rest).
 
 
 get_fd(#ems{fd=Fd}) ->
@@ -165,6 +172,10 @@ get_fd(#ems{fd=Fd}) ->
 
 get_state(#ems{root=Root}) ->
     Root.
+
+
+get_bb_chunk_size(#ems{bb_chunk = Size}) ->
+    Size.
 
 
 add(Ems, []) ->
@@ -224,7 +235,7 @@ decimate(#ems{root={_BB, nil}}=Ems) ->
     % We have less than bb_chunk backbone pointers so we're
     % good to start streaming KV's back to the client.
     Ems;
-decimate(#ems{root={BB, NextBB}}=Ems) ->
+decimate(#ems{}=Ems0) ->
     % To make sure we have a bounded amount of data in RAM
     % at any given point we first need to decimate the data
     % by performing the first couple iterations of a merge
@@ -232,43 +243,47 @@ decimate(#ems{root={BB, NextBB}}=Ems) ->
 
     % The first pass gives us a sort with pointers linked from
     % largest to smallest.
-    {RevBB, RevNextBB} = merge_back_bone(Ems, small, BB, NextBB),
+    {ok, Ems1} = event_notify(Ems0, {merge_start, forward}),
+    {ok, Ems2} = merge_back_bone(Ems1, small),
 
     % We have to run a second pass so that links are pointed
     % back from smallest to largest.
-    {FwdBB, FwdNextBB} = merge_back_bone(Ems, big, RevBB, RevNextBB),
+    {ok, Ems3} = event_notify(Ems2, {merge_start, reverse}),
+    {ok, Ems4} = merge_back_bone(Ems3, big),
 
     % Continue deicmating until we have an acceptable bound on
     % the number of keys to use.
-    decimate(Ems#ems{root={FwdBB, FwdNextBB}}).
+    decimate(Ems4).
 
 
-merge_back_bone(Ems, Choose, BB, NextBB) ->
-    BBPos = merge_chains(Ems, Choose, BB),
-    merge_rest_back_bone(Ems, Choose, NextBB, {[BBPos], nil}).
+merge_back_bone(#ems{root={BB, NextBB}}=Ems0, Choose) ->
+    {ok, Ems1, BBPos} = merge_chains(Ems0, Choose, BB),
+    merge_rest_back_bone(Ems1, Choose, NextBB, {[BBPos], nil}).
 
 
-merge_rest_back_bone(_Ems, _Choose, nil, Acc) ->
-    Acc;
-merge_rest_back_bone(Ems, Choose, BBPos, Acc) ->
-    {ok, {BB, NextBB}} = couch_file:pread_term(Ems#ems.fd, BBPos),
-    NewPos = merge_chains(Ems, Choose, BB),
-    {NewBB, NewPrev} = append_item(Ems, Acc, NewPos, Ems#ems.bb_chunk),
-    merge_rest_back_bone(Ems, Choose, NextBB, {NewBB, NewPrev}).
+merge_rest_back_bone(Ems, _Choose, nil, Acc) ->
+    {ok, Ems#ems{root=Acc}};
+merge_rest_back_bone(Ems0, Choose, BBPos, Acc) ->
+    {ok, {BB, NextBB}} = couch_file:pread_term(Ems0#ems.fd, BBPos),
+    {ok, Ems1, NewPos} = merge_chains(Ems0, Choose, BB),
+    {NewBB, NewPrev} = append_item(Ems1, Acc, NewPos, Ems1#ems.bb_chunk),
+    merge_rest_back_bone(Ems1, Choose, NextBB, {NewBB, NewPrev}).
 
 
-merge_chains(Ems, Choose, BB) ->
-    Chains = init_chains(Ems, Choose, BB),
-    merge_chains(Ems, Choose, Chains, {[], nil}).
+merge_chains(Ems0, Choose, BB) ->
+    {ok, Ems1} = event_notify(Ems0, {merge, chain}),
+    Chains = init_chains(Ems1, Choose, BB),
+    merge_chains(Ems1, Choose, Chains, {[], nil}).
 
 
 merge_chains(Ems, _Choose, [], ChainAcc) ->
     {ok, CPos, _} = couch_file:append_term(Ems#ems.fd, ChainAcc),
-    CPos;
-merge_chains(#ems{chain_chunk=CC}=Ems, Choose, Chains, Acc) ->
-    {KV, RestChains} = choose_kv(Choose, Ems, Chains),
-    {NewKVs, NewPrev} = append_item(Ems, Acc, KV, CC),
-    merge_chains(Ems, Choose, RestChains, {NewKVs, NewPrev}).
+    {ok, Ems, CPos};
+merge_chains(#ems{chain_chunk=CC}=Ems0, Choose, Chains, Acc) ->
+    {KV, RestChains} = choose_kv(Choose, Ems0, Chains),
+    {NewKVs, NewPrev} = append_item(Ems0, Acc, KV, CC),
+    {ok, Ems1} = event_notify(Ems0, row_copy),
+    merge_chains(Ems1, Choose, RestChains, {NewKVs, NewPrev}).
 
 
 init_chains(Ems, Choose, BB) ->
@@ -316,3 +331,9 @@ append_item(Ems, {List, Prev}, Pos, Size) when length(List) >= Size ->
 append_item(_Ems, {List, Prev}, Pos, _Size) ->
     {[Pos | List], Prev}.
 
+
+event_notify(#ems{event_cb = undefined} = Ems, _) ->
+    {ok, Ems};
+event_notify(#ems{event_cb=EventCB, event_st=EventSt}=Ems, Event) ->
+    NewSt = EventCB(Ems, Event, EventSt),
+    {ok, Ems#ems{event_st=NewSt}}.
