@@ -1549,13 +1549,20 @@ validate_dbname_int(DbName, Normalized) when is_binary(DbName) ->
     DbNoExt = couch_util:drop_dot_couch_ext(DbName),
     case re:run(DbNoExt, ?DBNAME_REGEX, [{capture,none}, dollar_endonly]) of
         match ->
-            ok;
+            case validate_part_lengths(DbName) of
+                true -> ok;
+                false -> {error, {database_name_too_long, DbName}}
+            end;
         nomatch ->
             case is_systemdb(Normalized) of
                 true -> ok;
                 false -> {error, {illegal_database_name, DbName}}
             end
     end.
+
+validate_part_lengths(DbName) ->
+    Parts = filename:split(DbName),
+    [Part || Part <- Parts, byte_size(Part) > 128] == [].
 
 is_systemdb(DbName) when is_list(DbName) ->
     is_systemdb(?l2b(DbName));

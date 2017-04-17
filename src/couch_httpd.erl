@@ -894,6 +894,10 @@ error_info({error, {illegal_database_name, Name}}) ->
         "digits (0-9), and any of the characters _, $, (, ), +, -, and / ",
         "are allowed. Must begin with a letter.">>,
     {400, <<"illegal_database_name">>, Message};
+error_info({error, {database_name_too_long, DbName}}) ->
+    {400, <<"database_name_too_long">>,
+        <<"At least one path segment of `", DbName/binary, "` is longer "
+        "than the limit of 128 characters.">>};
 error_info({missing_stub, Reason}) ->
     {412, <<"missing_stub">>, Reason};
 error_info({Error, Reason}) ->
