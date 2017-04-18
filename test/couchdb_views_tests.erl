@@ -106,7 +106,8 @@ view_group_db_leaks_test_() ->
                 fun setup_with_docs/0, fun teardown/1,
                 [
                     fun couchdb_1138/1,
-                    fun couchdb_1309/1
+                    fun couchdb_1309/1,
+                    fun should_close_old_fd_after_view_compaction/1
                 ]
             }
         }
@@ -399,6 +400,31 @@ couchdb_1283() ->
         ?assertEqual(ok, stop_writer(Writer1)),
         ?assertEqual(ok, stop_writer(Writer2)),
         ?assertEqual(ok, stop_writer(Writer3))
+    end).
+
+should_close_old_fd_after_view_compaction(DbName) ->
+    ?_test(begin
+        {ok, IndexerPid} = couch_index_server:get_index(
+            couch_mrview_index, DbName, <<"_design/foo">>),
+        ?assert(is_pid(IndexerPid)),
+        ?assert(is_process_alive(IndexerPid)),
+
+        IndexFd = get_view_fd(IndexerPid),
+
+        ?assert(is_pid(IndexFd)),
+        ?assert(is_process_alive(IndexFd)),
+
+        wait_indexer(IndexerPid),
+
+        create_doc(DbName, "doc1001"),
+
+        compact_view_group(DbName, "foo"),
+        IndexNewFd = get_view_fd(IndexerPid),
+        ?assertNotEqual(IndexFd, IndexNewFd),
+
+        ?assert(is_process_alive(IndexNewFd)),
+        ?assertNot(is_process_alive(IndexFd)),
+        ok
     end).
 
 create_doc(DbName, DocId) when is_list(DocId) ->
@@ -704,3 +730,7 @@ wait_indexer(IndexerPid) ->
                 ok
         end
     end).
+
+get_view_fd(IndexerPid) ->
+    {ok, MRST} = couch_index:get_state(IndexerPid, 0),
+    MRST#mrst.fd.
