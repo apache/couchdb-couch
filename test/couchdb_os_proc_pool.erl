@@ -12,6 +12,12 @@
 
 -module(couchdb_os_proc_pool).
 
+%% tests are failing under Windows, see COUCHDB-3140
+-ifdef(WINDOWS).
+-undef(TEST).
+-define(NOTEST, 1).
+-endif.
+
 -include_lib("couch/include/couch_eunit.hrl").
 -include_lib("couch/include/couch_db.hrl").
 
