@@ -33,6 +33,7 @@
 -export([find_in_binary/2]).
 -export([callback_exists/3, validate_callback_exists/3]).
 -export([with_proc/4]).
+-export([record_to_versioned/1, record_to_unversioned/1]).
 
 -include_lib("couch/include/couch_db.hrl").
 
@@ -598,3 +599,9 @@ with_proc(M, F, A, Timeout) ->
         erlang:demonitor(Ref, [flush]),
         {error, timeout}
     end.
+
+record_to_versioned(Tuple) ->
+    erlang:insert_element(?RECORD_VSN_POS, Tuple, 1).
+
+record_to_unversioned(Tuple) ->
+    erlang:delete_element(?RECORD_VSN_POS, Tuple).

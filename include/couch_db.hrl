@@ -55,6 +55,16 @@
 -type branch() :: {Key::term(), Value::term(), Tree::term()}.
 -type path() :: {Start::pos_integer(), branch()}.
 
+-define(RECORD_VSN_POS, 2).
+
+-define(is_versioned(Tuple),
+    is_tuple(Tuple)
+        andalso is_integer(element(?RECORD_VSN_POS, Tuple))
+).
+
+-define(record_vsn(Tuple),
+    element(?RECORD_VSN_POS, Tuple)).
+
 -record(rev_info, {
     rev,
     seq = 0,
